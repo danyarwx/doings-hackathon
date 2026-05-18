@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shlex
+import signal
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from backend.delivery import deliver
@@ -53,7 +55,15 @@ async def lifespan(app: FastAPI):
     app.state.session = SessionState()
     app.state.hub = Hub()
     app.state.endpoint = os.getenv("DOINGS_ENDPOINT", DEFAULT_ENDPOINT)
+    app.state.capture_proc = None
     yield
+    proc = app.state.capture_proc
+    if proc is not None and proc.returncode is None:
+        proc.send_signal(signal.SIGINT)
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=3.0)
+        except asyncio.TimeoutError:
+            proc.kill()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -92,6 +102,77 @@ async def _deliver_and_report(seg: Segment) -> None:
         "status": result.status,
         "attempts": result.attempts,
     })
+
+
+def _capture_command() -> list[str]:
+    cmd_str = os.getenv(
+        "CAPTURE_CMD",
+        "python -m capture.main --api-url http://localhost:8000",
+    )
+    return shlex.split(cmd_str)
+
+
+async def _monitor_capture(app: FastAPI) -> None:
+    proc = app.state.capture_proc
+    if proc is None:
+        return
+    await proc.wait()
+    # Capture exited (cleanly or otherwise) → return to idle.
+    app.state.capture_proc = None
+    app.state.session.recording_state = "idle"
+    await app.state.hub.broadcast({
+        "type": "state",
+        "state": "idle",
+        "session_id": app.state.session.session_id,
+    })
+
+
+@app.post("/control/start")
+async def control_start() -> dict:
+    if app.state.capture_proc is not None and app.state.capture_proc.returncode is None:
+        raise HTTPException(status_code=409, detail="already recording")
+    cmd = _capture_command()
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    app.state.capture_proc = proc
+    app.state.session.recording_state = "recording"
+    asyncio.create_task(_monitor_capture(app))
+    await app.state.hub.broadcast({
+        "type": "state",
+        "state": "recording",
+        "session_id": app.state.session.session_id,
+    })
+    return {"pid": proc.pid}
+
+
+@app.post("/control/stop")
+async def control_stop() -> dict:
+    proc = app.state.capture_proc
+    if proc is None or proc.returncode is not None:
+        raise HTTPException(status_code=409, detail="not recording")
+    app.state.session.recording_state = "stopping"
+    await app.state.hub.broadcast({
+        "type": "state",
+        "state": "stopping",
+        "session_id": app.state.session.session_id,
+    })
+    proc.send_signal(signal.SIGINT)
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=3.0)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+    app.state.capture_proc = None
+    app.state.session.recording_state = "idle"
+    await app.state.hub.broadcast({
+        "type": "state",
+        "state": "idle",
+        "session_id": app.state.session.session_id,
+    })
+    return {"stopped": True}
 
 
 @app.get("/healthz")
