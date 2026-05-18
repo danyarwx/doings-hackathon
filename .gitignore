@@ -14,3 +14,6 @@ capture/models/
 # IDE
 .vscode/
 .idea/
+
+# Backend
+backend/.venv/
