@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import _pywhispercpp as pw
 import numpy as np
 from pywhispercpp.model import Model
 
@@ -28,8 +29,10 @@ class Transcriber:
 
     def transcribe(self, audio: np.ndarray, chunk_start_s: float) -> list[Segment]:
         """Transcribe one chunk and return session-relative segments."""
-        raw_segments = self._model.transcribe(audio, language="auto")
-        lang = getattr(self._model, "lang_detected", None) or "??"
+        # Omit `language` to let whisper.cpp auto-detect per chunk.
+        raw_segments = self._model.transcribe(audio)
+        lang_id = pw.whisper_full_lang_id(self._model._ctx)
+        lang = pw.whisper_lang_str(lang_id) if lang_id >= 0 else "??"
         out: list[Segment] = []
         for s in raw_segments:
             # pywhispercpp returns t0/t1 in centiseconds.
