@@ -13,18 +13,25 @@ from capture.segment import Segment
 
 MODELS_DIR = Path(__file__).parent / "models"
 
-# Cap normalization gain at +30 dB so we don't amplify pure silence into noise.
-MAX_GAIN_DB = 30.0
+# Cap normalization gain so we don't amplify pure silence into noise.
+MAX_GAIN_DB = 20.0
 # Below this RMS we treat the chunk as silence and skip normalization.
 SILENCE_RMS_FLOOR = 1e-4
 
 
-def normalize_rms(audio: np.ndarray, target_dbfs: float) -> np.ndarray:
-    """Apply gain to bring audio RMS to target_dbfs. No-op on silent chunks."""
+def rms_dbfs(audio: np.ndarray) -> float:
+    """Return RMS of audio expressed in dBFS, or -inf for silence."""
     rms = float(np.sqrt(np.mean(audio.astype(np.float64) ** 2)))
     if rms < SILENCE_RMS_FLOOR:
+        return float("-inf")
+    return 20.0 * np.log10(rms)
+
+
+def normalize_rms(audio: np.ndarray, target_dbfs: float) -> np.ndarray:
+    """Apply gain to bring audio RMS to target_dbfs. No-op on silent chunks."""
+    current_dbfs = rms_dbfs(audio)
+    if current_dbfs == float("-inf"):
         return audio
-    current_dbfs = 20.0 * np.log10(rms)
     gain_db = min(target_dbfs - current_dbfs, MAX_GAIN_DB)
     if gain_db <= 0:
         # Already at or above target — leave it alone.
@@ -39,7 +46,8 @@ class Transcriber:
         model_name: str = "medium",
         language: str | None = None,
         initial_prompt: str | None = None,
-        gain_target_dbfs: float | None = -20.0,
+        gain_target_dbfs: float | None = -25.0,
+        silence_gate_dbfs: float | None = -45.0,
     ) -> None:
         print(f"[transcribe] loading model '{model_name}'...", file=sys.stderr)
         MODELS_DIR.mkdir(exist_ok=True)
@@ -53,6 +61,7 @@ class Transcriber:
         self._forced_language = language
         self._initial_prompt = initial_prompt
         self._gain_target_dbfs = gain_target_dbfs
+        self._silence_gate_dbfs = silence_gate_dbfs
         if language:
             print(f"[transcribe] language forced to '{language}'.", file=sys.stderr)
         if initial_prompt:
@@ -60,17 +69,28 @@ class Transcriber:
             print(f"[transcribe] initial_prompt: {preview!r}", file=sys.stderr)
         if gain_target_dbfs is not None:
             print(
-                f"[transcribe] RMS-normalizing chunks to {gain_target_dbfs:g} dBFS.",
+                f"[transcribe] RMS-normalizing chunks to {gain_target_dbfs:g} dBFS "
+                f"(max gain {MAX_GAIN_DB:g} dB).",
+                file=sys.stderr,
+            )
+        if silence_gate_dbfs is not None:
+            print(
+                f"[transcribe] silence gate at {silence_gate_dbfs:g} dBFS.",
                 file=sys.stderr,
             )
         print("[transcribe] model loaded.", file=sys.stderr)
 
     def transcribe(self, audio: np.ndarray, chunk_start_s: float) -> list[Segment]:
         """Transcribe one chunk and return session-relative segments."""
+        # Silence gate uses pre-normalization RMS so quiet noise can't sneak through.
+        if self._silence_gate_dbfs is not None:
+            if rms_dbfs(audio) < self._silence_gate_dbfs:
+                return []
+
         if self._gain_target_dbfs is not None:
             audio = normalize_rms(audio, self._gain_target_dbfs)
 
-        params: dict = {}
+        params: dict = {"suppress_non_speech_tokens": True}
         if self._initial_prompt:
             params["initial_prompt"] = self._initial_prompt
         if self._forced_language:

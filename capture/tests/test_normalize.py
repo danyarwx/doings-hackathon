@@ -1,6 +1,6 @@
 import numpy as np
 
-from capture.transcribe import MAX_GAIN_DB, normalize_rms
+from capture.transcribe import MAX_GAIN_DB, normalize_rms, rms_dbfs
 
 
 def _rms_dbfs(audio: np.ndarray) -> float:
@@ -8,11 +8,21 @@ def _rms_dbfs(audio: np.ndarray) -> float:
     return 20.0 * np.log10(rms)
 
 
-def test_quiet_signal_is_boosted_to_target():
-    # 1 kHz sine at -40 dBFS for 0.1s
+def test_rms_dbfs_silence_returns_neg_inf():
+    assert rms_dbfs(np.zeros(1600, dtype=np.float32)) == float("-inf")
+
+
+def test_rms_dbfs_matches_independent_calculation():
     t = np.linspace(0, 0.1, 1600, endpoint=False, dtype=np.float32)
-    quiet = (0.01 * np.sin(2 * np.pi * 1000 * t)).astype(np.float32)
-    assert _rms_dbfs(quiet) < -30.0  # sanity
+    sig = (0.1 * np.sin(2 * np.pi * 1000 * t)).astype(np.float32)
+    assert abs(rms_dbfs(sig) - _rms_dbfs(sig)) < 0.01
+
+
+def test_quiet_signal_is_boosted_to_target():
+    # 1 kHz sine at ~-30 dBFS — needs ~10 dB gain, well under MAX_GAIN_DB
+    t = np.linspace(0, 0.1, 1600, endpoint=False, dtype=np.float32)
+    quiet = (0.045 * np.sin(2 * np.pi * 1000 * t)).astype(np.float32)
+    assert -32.0 < _rms_dbfs(quiet) < -28.0  # sanity
 
     out = normalize_rms(quiet, target_dbfs=-20.0)
     assert abs(_rms_dbfs(out) - (-20.0)) < 0.5

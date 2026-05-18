@@ -39,14 +39,27 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--gain-target-dbfs",
         type=float,
-        default=-20.0,
+        default=-25.0,
         help="RMS-normalize each chunk to this dBFS level before transcribing "
-        "(default: -20.0). Set to a positive number or 'inf' to disable.",
+        "(default: -25.0). Lower = less boost, less noise hallucination.",
     )
     p.add_argument(
         "--no-normalize",
         action="store_true",
         help="Disable RMS normalization (overrides --gain-target-dbfs).",
+    )
+    p.add_argument(
+        "--silence-gate-dbfs",
+        type=float,
+        default=-45.0,
+        help="Skip transcribing chunks whose RMS is below this dBFS "
+        "(default: -45.0). Prevents noise hallucinations like '[sigh]'. "
+        "Set higher to gate more aggressively.",
+    )
+    p.add_argument(
+        "--no-silence-gate",
+        action="store_true",
+        help="Disable the silence gate (transcribe every chunk).",
     )
     p.add_argument("--list-devices", action="store_true", help="List input devices and exit")
     return p.parse_args()
@@ -66,12 +79,14 @@ def main() -> int:
         initial_prompt = args.prompt
 
     gain_target = None if args.no_normalize else args.gain_target_dbfs
+    silence_gate = None if args.no_silence_gate else args.silence_gate_dbfs
 
     transcriber = Transcriber(
         model_name=args.model,
         language=args.language,
         initial_prompt=initial_prompt,
         gain_target_dbfs=gain_target,
+        silence_gate_dbfs=silence_gate,
     )
 
     chunk_queue: "queue.Queue[tuple[float, object]]" = queue.Queue(maxsize=8)
