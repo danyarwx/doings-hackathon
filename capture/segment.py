@@ -9,3 +9,5 @@ class Segment:
     start_s: float
     end_s: float
     lang: str
+    id: str | None = None
+    session_id: str | None = None
