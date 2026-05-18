@@ -54,7 +54,6 @@ Angular UI, and each segment is confirmed delivered to the Doings staging endpoi
 ### Core MVP — the demo cannot happen without these
 
 - Local multilingual transcription (German + English, auto-detected per segment)
-- Angular UI with live transcript stream
 - HTTPS POST to `staging.doings.de/stt` for every segment
 - Offline STT — no network required for capture or transcription
 - System audio capture (OS-native, per platform)
