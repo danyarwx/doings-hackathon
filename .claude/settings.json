@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(capture/.venv/bin/python -c \"import pywhispercpp; print\\(dir\\(pywhispercpp\\)\\)\")",
+      "Bash(ls /opt/homebrew/bin/python* /usr/local/bin/python* 2>&1 | head -20)",
+      "Read(//opt/homebrew/bin/**)",
+      "Bash(PYTHONPATH=/Users/danila/Documents/doings capture/.venv/bin/python -c \"from capture.transcribe import Transcriber; print\\('import ok'\\)\")",
+      "Read(//usr/local/bin/**)",
+      "Bash(/usr/bin/python3 --version)",
+      "Bash(/opt/homebrew/bin/python3 --version)",
+      "Bash(/opt/homebrew/bin/python3.14 -m venv capture/.venv)",
+      "Bash(capture/.venv/bin/pip install *)",
+      "Bash(PYTHONPATH=/Users/danila/Documents/doings capture/.venv/bin/python -c \"from pywhispercpp.model import Model; import inspect; print\\(inspect.signature\\(Model.__init__\\)\\)\")",
+      "Bash(git -C /Users/danila/Documents/doings add capture/transcribe.py)",
+      "Bash(git -C /Users/danila/Documents/doings commit -m \"add Transcriber wrapping pywhispercpp\")",
+      "Bash(PYTHONPATH=/Users/danila/Documents/doings capture/.venv/bin/python -m capture.main --list-devices)",
+      "Bash(PYTHONPATH=/Users/danila/Documents/doings capture/.venv/bin/python -c ' *)",
+      "Bash(PYTHONPATH=. capture/.venv/bin/pytest capture/tests -v)",
+      "Bash(PYTHONPATH=. capture/.venv/bin/python -c \"from capture.transcribe import Transcriber; print\\('import ok'\\)\")",
+      "Bash(git -C /Users/danila/Documents/doings commit -m 'fix language detection in Transcriber *)",
+      "Bash(PYTHONPATH=. capture/.venv/bin/pytest capture/tests -q)",
+      "Bash(PYTHONPATH=. capture/.venv/bin/python -m capture.main --help)",
+      "Bash(git -C /Users/danila/Documents/doings add capture/main.py capture/transcribe.py)",
+      "Bash(git -C /Users/danila/Documents/doings commit -m 'add --language flag to force language detection *)"
+    ]
+  }
+}
