@@ -7,6 +7,7 @@ import os
 import shlex
 import signal
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
@@ -15,6 +16,12 @@ from backend.delivery import deliver
 from backend.state import Segment, SessionState
 
 DEFAULT_ENDPOINT = "https://staging.doings.de/stt"
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+CAPTURE_PYTHON = REPO_ROOT / "capture" / ".venv" / "bin" / "python"
+DEFAULT_CAPTURE_CMD = (
+    f"{CAPTURE_PYTHON} -m capture.main --api-url http://localhost:8000"
+)
 
 
 class SegmentIn(BaseModel):
@@ -105,11 +112,14 @@ async def _deliver_and_report(seg: Segment) -> None:
 
 
 def _capture_command() -> list[str]:
-    cmd_str = os.getenv(
-        "CAPTURE_CMD",
-        "python -m capture.main --api-url http://localhost:8000",
-    )
+    cmd_str = os.getenv("CAPTURE_CMD", DEFAULT_CAPTURE_CMD)
     return shlex.split(cmd_str)
+
+
+def _capture_env() -> dict:
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(REPO_ROOT)
+    return env
 
 
 async def _monitor_capture(app: FastAPI) -> None:
@@ -136,6 +146,8 @@ async def control_start() -> dict:
         *cmd,
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
+        cwd=str(REPO_ROOT),
+        env=_capture_env(),
     )
     app.state.capture_proc = proc
     app.state.session.recording_state = "recording"
