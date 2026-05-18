@@ -90,7 +90,7 @@ class Transcriber:
         if self._gain_target_dbfs is not None:
             audio = normalize_rms(audio, self._gain_target_dbfs)
 
-        params: dict = {"suppress_non_speech_tokens": True}
+        params: dict = {}
         if self._initial_prompt:
             params["initial_prompt"] = self._initial_prompt
         if self._forced_language:
