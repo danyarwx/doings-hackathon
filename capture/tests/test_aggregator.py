@@ -51,6 +51,17 @@ def test_empty_flush_returns_nothing():
     assert agg.flush() == []
 
 
+def test_current_reflects_in_progress_paragraph():
+    agg = ParagraphAggregator(gap_s=1.5, max_paragraph_s=30.0)
+    assert agg.current() is None
+    agg.add(seg("Hello.", 0.0, 1.0))
+    assert agg.current() == seg("Hello.", 0.0, 1.0)
+    agg.add(seg("World.", 1.2, 2.0))
+    assert agg.current() == Segment(text="Hello. World.", start_s=0.0, end_s=2.0, lang="en")
+    agg.flush()
+    assert agg.current() is None
+
+
 def test_text_is_joined_with_single_space_and_stripped():
     agg = ParagraphAggregator(gap_s=1.5, max_paragraph_s=30.0)
     agg.add(seg("  First  ", 0.0, 1.0))

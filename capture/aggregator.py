@@ -41,6 +41,12 @@ class ParagraphAggregator:
         self._buffer.append(seg)
         return []
 
+    def current(self) -> Segment | None:
+        """Return the merged in-progress paragraph, or None if the buffer is empty."""
+        if not self._buffer:
+            return None
+        return self._merge(self._buffer)
+
     def flush(self) -> list[Segment]:
         if not self._buffer:
             return []

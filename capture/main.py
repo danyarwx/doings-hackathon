@@ -127,12 +127,29 @@ def main() -> int:
             file=sys.stderr,
         )
 
-    def emit(seg) -> None:
+    # In paragraph mode we use ANSI \r + clear-line to redraw the in-progress
+    # paragraph on the same terminal row as new segments arrive. When the
+    # aggregator closes a paragraph, we commit the line (newline) and start
+    # the next one on a fresh row.
+    CLEAR_LINE = "\r\033[K"
+    tty = sys.stdout.isatty()
+
+    def emit_closed(seg) -> None:
         nonlocal segment_count
         line = format_segment(seg)
         if line:
-            print(line, flush=True)
+            if tty and aggregator is not None:
+                print(CLEAR_LINE + line, flush=True)
+            else:
+                print(line, flush=True)
             segment_count += 1
+
+    def render_open(seg) -> None:
+        if not tty:
+            return
+        line = format_segment(seg)
+        if line:
+            print(CLEAR_LINE + line, end="", flush=True)
 
     capture_thread = start_capture(chunk_queue, stop_event, device=args.device)
     print("[main] recording. press Ctrl-C to stop.", file=sys.stderr)
@@ -156,15 +173,24 @@ def main() -> int:
                 continue
             for seg in segs:
                 if aggregator is None:
-                    emit(seg)
+                    emit_closed(seg)
                 else:
                     for ready in aggregator.add(seg):
-                        emit(ready)
+                        emit_closed(ready)
+                    open_par = aggregator.current()
+                    if open_par is not None:
+                        if tty:
+                            render_open(open_par)
+                        else:
+                            # No TTY: just print each new segment as it arrives.
+                            # We don't accumulate the open paragraph in this mode —
+                            # the file output will be the final paragraphs only.
+                            pass
     finally:
         stop_event.set()
         if aggregator is not None:
             for ready in aggregator.flush():
-                emit(ready)
+                emit_closed(ready)
         capture_thread.join(timeout=2.0)
         elapsed = time.monotonic() - started_at
         print(

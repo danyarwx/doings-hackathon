@@ -68,7 +68,7 @@ Whisper emits short, fragmented segments. By default they're combined into parag
 --no-paragraphs                     # disable grouping; print one line per raw segment
 ```
 
-**Latency note:** paragraphs only print once whisper sees the next segment beyond the gap (or on Ctrl-C). Worst-case latency ≈ chunk size (2s) + gap (1.5s) ≈ 4s.
+**How it renders:** in a TTY, the current paragraph grows in-place on the same line as new segments arrive — no latency added. When a boundary fires (silence ≥ gap, language change, or max duration), the paragraph is committed (newline) and the next one starts on a fresh row. Piped to a file, only the final paragraphs are written.
 
 ### Audio preprocessing
 
