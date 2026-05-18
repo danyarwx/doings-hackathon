@@ -31,12 +31,7 @@ Five isolated processes, one local app:
 
 ## Transcript shaping
 
-Whisper emits short, often per-sentence segments. Step 1 groups them into **paragraphs** based on:
-- **Silence gap** between consecutive segments (default 1.5s; tune with `--paragraph-gap-s`)
-- **Language change** (DE→EN switch is always a paragraph boundary)
-- **Max paragraph duration** (default 30s; tune with `--max-paragraph-s`)
-
-Use `--no-paragraphs` to disable and emit one line per raw whisper segment. Speaker- and topic-based grouping are separate concerns (PRD diarization stretch and Step 3 LLM analysis, respectively).
+Default Step 1 output is **one line per raw whisper segment**. An experimental paragraph aggregator (`--paragraphs`) groups consecutive segments by silence gap, language change, or max duration, but accuracy of the boundary heuristic still needs work — keep it opt-in until line-by-line is reliable. Speaker- and topic-based grouping are separate concerns (PRD diarization stretch and Step 3 LLM analysis, respectively).
 
 ## Build order (hard rule)
 

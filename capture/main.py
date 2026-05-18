@@ -63,21 +63,22 @@ def parse_args() -> argparse.Namespace:
         help="Disable the silence gate (transcribe every chunk).",
     )
     p.add_argument(
+        "--paragraphs",
+        action="store_true",
+        help="Group consecutive segments into paragraphs split by silence "
+        "(experimental — off by default).",
+    )
+    p.add_argument(
         "--paragraph-gap-s",
         type=float,
         default=1.5,
-        help="Silence (seconds) between segments that ends a paragraph (default: 1.5).",
+        help="With --paragraphs: silence (s) between segments that ends a paragraph (default: 1.5).",
     )
     p.add_argument(
         "--max-paragraph-s",
         type=float,
         default=30.0,
-        help="Maximum paragraph duration before a forced split (default: 30.0).",
-    )
-    p.add_argument(
-        "--no-paragraphs",
-        action="store_true",
-        help="Disable paragraph grouping; print one line per raw whisper segment.",
+        help="With --paragraphs: max paragraph duration before a forced split (default: 30.0).",
     )
     p.add_argument("--list-devices", action="store_true", help="List input devices and exit")
     return p.parse_args()
@@ -116,7 +117,7 @@ def main() -> int:
     signal.signal(signal.SIGINT, handle_sigint)
 
     aggregator = None
-    if not args.no_paragraphs:
+    if args.paragraphs:
         aggregator = ParagraphAggregator(
             gap_s=args.paragraph_gap_s,
             max_paragraph_s=args.max_paragraph_s,

@@ -29,11 +29,11 @@ From the repo root:
 PYTHONPATH=. capture/.venv/bin/python -m capture.main
 ```
 
-Speak. Paragraphs appear like:
+Speak. One line per whisper segment:
 
 ```
-[00:12.4 → 00:18.6] [DE] Das System muss mindestens 500 Nutzer unterstützen. Die Authentifizierung sollte OAuth verwenden.
-[00:20.1 → 00:24.0] [EN] We also need an export function for the data.
+[00:12.4 → 00:15.1] [DE] Das System muss mindestens 500 Nutzer unterstützen.
+[00:17.0 → 00:19.3] [EN] Authentication should use OAuth 2.0.
 ```
 
 Press Ctrl-C to stop.
@@ -58,17 +58,17 @@ Press Ctrl-C to stop.
 
 Whisper's auto-detect can be biased toward English on short utterances. Force the language for single-language sessions to get accurate transcripts and language tags.
 
-### Paragraph grouping
+### Paragraph grouping (experimental, off by default)
 
-Whisper emits short, fragmented segments. By default they're combined into paragraphs that end on silence, language switches, or a duration cap.
+Whisper emits short fragmented segments; the aggregator can combine them into paragraphs that end on silence, language switches, or a duration cap. **Default is one line per raw segment** — paragraph mode is opt-in:
 
 ```bash
+--paragraphs                        # enable paragraph grouping
 --paragraph-gap-s 1.5               # silence (s) that ends a paragraph (default: 1.5)
 --max-paragraph-s 30.0              # max paragraph duration before forced split (default: 30)
---no-paragraphs                     # disable grouping; print one line per raw segment
 ```
 
-**How it renders:** in a TTY, the current paragraph grows in-place on the same line as new segments arrive — no latency added. When a boundary fires (silence ≥ gap, language change, or max duration), the paragraph is committed (newline) and the next one starts on a fresh row. Piped to a file, only the final paragraphs are written.
+In a TTY with `--paragraphs`, the current paragraph grows in-place on the same line as new segments arrive; when a boundary fires, the paragraph commits (newline) and the next one starts on a fresh row.
 
 ### Audio preprocessing
 
