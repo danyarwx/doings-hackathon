@@ -8,11 +8,15 @@ import signal
 import sys
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
+
+import httpx
 
 from capture.aggregator import ParagraphAggregator
 from capture.capture import list_input_devices, start_capture
 from capture.formatter import format_segment
+from capture.segment import Segment
 from capture.transcribe import Transcriber
 
 
@@ -80,12 +84,27 @@ def parse_args() -> argparse.Namespace:
         default=30.0,
         help="With --paragraphs: max paragraph duration before a forced split (default: 30.0).",
     )
+    p.add_argument(
+        "--api-url",
+        default=None,
+        help="Backend URL (e.g. http://localhost:8000). When set, each segment is "
+        "POSTed to {api_url}/segments fire-and-forget.",
+    )
     p.add_argument("--list-devices", action="store_true", help="List input devices and exit")
     return p.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+
+    session_id = "sess-" + datetime.now().strftime("%Y%m%d-%H%M%S")
+    segment_counter = 0
+
+    api_client: httpx.Client | None = None
+    if args.api_url:
+        api_client = httpx.Client(base_url=args.api_url, timeout=1.0)
+        print(f"[main] posting segments to {args.api_url}/segments", file=sys.stderr)
+        print(f"[main] session_id={session_id}", file=sys.stderr)
 
     if args.list_devices:
         for idx, name in list_input_devices():
@@ -135,8 +154,39 @@ def main() -> int:
     CLEAR_LINE = "\r\033[K"
     tty = sys.stdout.isatty()
 
+    def assign_ids(seg: Segment) -> Segment:
+        nonlocal segment_counter
+        segment_counter += 1
+        return Segment(
+            text=seg.text,
+            start_s=seg.start_s,
+            end_s=seg.end_s,
+            lang=seg.lang,
+            id=f"seg-{segment_counter:03d}",
+            session_id=session_id,
+        )
+
+    def post_segment(seg: Segment) -> None:
+        if api_client is None:
+            return
+        try:
+            api_client.post(
+                "/segments",
+                json={
+                    "id": seg.id,
+                    "session_id": seg.session_id,
+                    "text": seg.text,
+                    "start_s": seg.start_s,
+                    "end_s": seg.end_s,
+                    "lang": seg.lang,
+                },
+            )
+        except Exception as exc:
+            print(f"[main] POST failed for {seg.id}: {exc}", file=sys.stderr)
+
     def emit_closed(seg) -> None:
         nonlocal segment_count
+        seg = assign_ids(seg)
         line = format_segment(seg)
         if line:
             if tty and aggregator is not None:
@@ -144,6 +194,7 @@ def main() -> int:
             else:
                 print(line, flush=True)
             segment_count += 1
+        post_segment(seg)
 
     def render_open(seg) -> None:
         if not tty:
@@ -192,6 +243,8 @@ def main() -> int:
         if aggregator is not None:
             for ready in aggregator.flush():
                 emit_closed(ready)
+        if api_client is not None:
+            api_client.close()
         capture_thread.join(timeout=2.0)
         elapsed = time.monotonic() - started_at
         print(
