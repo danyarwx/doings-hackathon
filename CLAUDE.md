@@ -29,6 +29,15 @@ Five isolated processes, one local app:
 4. **FastAPI fan-out** — segments → WS (UI) + HTTPS POST (staging.doings.de/stt) with retry (exp backoff, max 3, on 5xx)
 5. **Diarization worker (stretch)** — pyannote labels patched onto existing segments; never on hot path
 
+## Transcript shaping
+
+Whisper emits short, often per-sentence segments. Step 1 groups them into **paragraphs** based on:
+- **Silence gap** between consecutive segments (default 1.5s; tune with `--paragraph-gap-s`)
+- **Language change** (DE→EN switch is always a paragraph boundary)
+- **Max paragraph duration** (default 30s; tune with `--max-paragraph-s`)
+
+Use `--no-paragraphs` to disable and emit one line per raw whisper segment. Speaker- and topic-based grouping are separate concerns (PRD diarization stretch and Step 3 LLM analysis, respectively).
+
 ## Build order (hard rule)
 
 Each step must work end-to-end before the next begins. A working Step 1 alone beats a broken Step 3.

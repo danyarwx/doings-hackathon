@@ -10,6 +10,7 @@ import threading
 import time
 from pathlib import Path
 
+from capture.aggregator import ParagraphAggregator
 from capture.capture import list_input_devices, start_capture
 from capture.formatter import format_segment
 from capture.transcribe import Transcriber
@@ -61,6 +62,23 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable the silence gate (transcribe every chunk).",
     )
+    p.add_argument(
+        "--paragraph-gap-s",
+        type=float,
+        default=1.5,
+        help="Silence (seconds) between segments that ends a paragraph (default: 1.5).",
+    )
+    p.add_argument(
+        "--max-paragraph-s",
+        type=float,
+        default=30.0,
+        help="Maximum paragraph duration before a forced split (default: 30.0).",
+    )
+    p.add_argument(
+        "--no-paragraphs",
+        action="store_true",
+        help="Disable paragraph grouping; print one line per raw whisper segment.",
+    )
     p.add_argument("--list-devices", action="store_true", help="List input devices and exit")
     return p.parse_args()
 
@@ -97,6 +115,25 @@ def main() -> int:
 
     signal.signal(signal.SIGINT, handle_sigint)
 
+    aggregator = None
+    if not args.no_paragraphs:
+        aggregator = ParagraphAggregator(
+            gap_s=args.paragraph_gap_s,
+            max_paragraph_s=args.max_paragraph_s,
+        )
+        print(
+            f"[main] paragraph mode: gap >= {args.paragraph_gap_s:g}s or "
+            f"duration > {args.max_paragraph_s:g}s ends a paragraph.",
+            file=sys.stderr,
+        )
+
+    def emit(seg) -> None:
+        nonlocal segment_count
+        line = format_segment(seg)
+        if line:
+            print(line, flush=True)
+            segment_count += 1
+
     capture_thread = start_capture(chunk_queue, stop_event, device=args.device)
     print("[main] recording. press Ctrl-C to stop.", file=sys.stderr)
 
@@ -118,12 +155,16 @@ def main() -> int:
                 )
                 continue
             for seg in segs:
-                line = format_segment(seg)
-                if line:
-                    print(line, flush=True)
-                    segment_count += 1
+                if aggregator is None:
+                    emit(seg)
+                else:
+                    for ready in aggregator.add(seg):
+                        emit(ready)
     finally:
         stop_event.set()
+        if aggregator is not None:
+            for ready in aggregator.flush():
+                emit(ready)
         capture_thread.join(timeout=2.0)
         elapsed = time.monotonic() - started_at
         print(

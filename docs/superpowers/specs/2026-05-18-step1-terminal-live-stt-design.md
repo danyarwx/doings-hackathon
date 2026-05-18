@@ -116,6 +116,27 @@ def format_segment(seg: Segment) -> str
 - Language tag: uppercased ISO code in brackets.
 - Empty-text segments and segments where `text.strip() == ""` are skipped (whisper sometimes emits silence markers).
 
+### `capture/aggregator.py` — Paragraph grouping
+
+**Purpose:** Combine consecutive `Segment`s into paragraph-sized units split by silence gaps, language changes, or a max duration.
+
+**Interface:**
+```python
+class ParagraphAggregator:
+    def __init__(self, gap_s: float, max_paragraph_s: float): ...
+    def add(self, seg: Segment) -> list[Segment]: ...
+    def flush(self) -> list[Segment]: ...
+```
+
+**Boundary rules** (any one ends the current paragraph and starts a new one):
+- `seg.start_s - last.end_s >= gap_s` (silence)
+- `seg.lang != buffer[0].lang` (language switch)
+- `seg.end_s - buffer[0].start_s > max_paragraph_s` (cap on duration)
+
+`add()` returns paragraphs that just completed (often empty). `flush()` returns any pending paragraph on shutdown.
+
+Defaults: `gap_s=1.5`, `max_paragraph_s=30.0`. Disable with `--no-paragraphs` on the CLI.
+
 ### `capture/main.py` — Entrypoint
 
 **Purpose:** Wire the pieces, handle signals.
