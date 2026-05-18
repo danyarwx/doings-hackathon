@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply font-sans text-white antialiased;
+    background: linear-gradient(135deg, theme(colors.bg.from) 0%, theme(colors.bg.to) 100%);
+  }
+}

@@ -17,3 +17,7 @@ capture/models/
 
 # Backend
 backend/.venv/
+
+# Node
+ui/node_modules/
+ui/dist/
