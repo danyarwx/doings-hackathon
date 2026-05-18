@@ -15,7 +15,7 @@ MODELS_DIR = Path(__file__).parent / "models"
 
 
 class Transcriber:
-    def __init__(self, model_name: str = "medium") -> None:
+    def __init__(self, model_name: str = "medium", language: str | None = None) -> None:
         print(f"[transcribe] loading model '{model_name}'...", file=sys.stderr)
         MODELS_DIR.mkdir(exist_ok=True)
         self._model = Model(
@@ -25,14 +25,21 @@ class Transcriber:
             print_progress=False,
             print_timestamps=False,
         )
+        self._forced_language = language
+        if language:
+            print(f"[transcribe] language forced to '{language}'.", file=sys.stderr)
         print("[transcribe] model loaded.", file=sys.stderr)
 
     def transcribe(self, audio: np.ndarray, chunk_start_s: float) -> list[Segment]:
         """Transcribe one chunk and return session-relative segments."""
-        # Omit `language` to let whisper.cpp auto-detect per chunk.
-        raw_segments = self._model.transcribe(audio)
-        lang_id = pw.whisper_full_lang_id(self._model._ctx)
-        lang = pw.whisper_lang_str(lang_id) if lang_id >= 0 else "??"
+        if self._forced_language:
+            raw_segments = self._model.transcribe(audio, language=self._forced_language)
+            lang = self._forced_language
+        else:
+            # Auto-detect per chunk.
+            raw_segments = self._model.transcribe(audio)
+            lang_id = pw.whisper_full_lang_id(self._model._ctx)
+            lang = pw.whisper_lang_str(lang_id) if lang_id >= 0 else "??"
         out: list[Segment] = []
         for s in raw_segments:
             # pywhispercpp returns t0/t1 in centiseconds.

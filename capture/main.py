@@ -18,6 +18,11 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Local live STT to the terminal.")
     p.add_argument("--model", default="medium", help="Whisper model (default: medium)")
     p.add_argument("--device", type=int, default=None, help="Input device index")
+    p.add_argument(
+        "--language",
+        default=None,
+        help="Force language code (e.g. 'de', 'en'). Default: auto-detect per chunk.",
+    )
     p.add_argument("--list-devices", action="store_true", help="List input devices and exit")
     return p.parse_args()
 
@@ -30,7 +35,7 @@ def main() -> int:
             print(f"{idx}: {name}")
         return 0
 
-    transcriber = Transcriber(model_name=args.model)
+    transcriber = Transcriber(model_name=args.model, language=args.language)
 
     chunk_queue: "queue.Queue[tuple[float, object]]" = queue.Queue(maxsize=8)
     stop_event = threading.Event()
