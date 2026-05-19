@@ -7,7 +7,7 @@ export default function App() {
   const session = useSessionWs();
 
   return (
-    <div className="min-h-screen p-6 flex flex-col gap-6">
+    <div className="h-screen p-6 flex flex-col gap-6 overflow-hidden">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 flex-1 min-h-0">
         <div className="min-h-0">
           <TranscriptPanel segments={session.segments} />
