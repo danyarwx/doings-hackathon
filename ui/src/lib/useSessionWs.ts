@@ -1,17 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import type {
-  DeliveryStatus,
-  RecordingState,
-  Segment,
-  WsMessage,
-} from "./types";
+import type { RecordingState, Segment, WsMessage } from "./types";
 
 export type SessionView = {
   state: RecordingState;
   sessionId: string | null;
   segments: Segment[];
-  deliveries: Map<string, DeliveryStatus>;
-  sessionStart: number | null;
 };
 
 const RECONNECT_BACKOFF_MS = [1000, 2000, 4000, 8000, 10000];
@@ -20,10 +13,6 @@ export function useSessionWs(): SessionView {
   const [state, setState] = useState<RecordingState>("disconnected");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [segments, setSegments] = useState<Segment[]>([]);
-  const [deliveries, setDeliveries] = useState<Map<string, DeliveryStatus>>(
-    new Map(),
-  );
-  const [sessionStart, setSessionStart] = useState<number | null>(null);
   const attemptRef = useRef(0);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -49,29 +38,12 @@ export function useSessionWs(): SessionView {
           return;
         }
         if (msg.type === "state") {
-          setState((prev) => {
-            if (prev !== "recording" && msg.state === "recording") {
-              setSessionStart(Date.now());
-            }
-            if (prev === "recording" && msg.state === "idle") {
-              setSessionStart(null);
-            }
-            return msg.state;
-          });
+          setState(msg.state);
           setSessionId(msg.session_id);
         } else if (msg.type === "segment") {
           setSegments((prev) => [...prev, msg.segment]);
-        } else if (msg.type === "delivery") {
-          setDeliveries((prev) => {
-            const next = new Map(prev);
-            next.set(msg.id, {
-              id: msg.id,
-              status: msg.status,
-              attempts: msg.attempts,
-            });
-            return next;
-          });
         }
+        // "delivery" messages are still sent by the backend; ignored in this UI.
       };
 
       ws.onclose = () => {
@@ -97,5 +69,5 @@ export function useSessionWs(): SessionView {
     };
   }, []);
 
-  return { state, sessionId, segments, deliveries, sessionStart };
+  return { state, sessionId, segments };
 }
