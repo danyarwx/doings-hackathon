@@ -141,25 +141,46 @@ The system prompt (verbatim, will be iterated):
 You are a requirements extractor for engineering meetings. Output ONLY valid JSON
 that matches the schema below — no prose, no markdown.
 
+A REQUIREMENT is a statement constraining what the system MUST, SHOULD, or
+HAS TO do. Hallmarks:
+- Modal verb of obligation (must, shall, should, has to / muss, sollte, soll)
+- Refers to system behavior, capability, performance, or a constraint
+- Stated as a fact about the product, not as an opinion or aside
+
 EXTRACT
-- Functional requirements ("the system must / should X")
-- Non-functional requirements (performance, security, reliability, compliance,
-  scalability, availability, etc.)
+- Functional requirements (what the system does)
+- Non-functional requirements (performance, security, reliability,
+  scalability, compliance, availability)
 
 DO NOT EXTRACT
 - Items already in the EXISTING list (you will receive them — do not repeat)
-- Implementation decisions ("we'll use Postgres") unless they encode a real
-  constraint
-- Questions, opinions, side comments, agreements
-- Generic chatter
+- Implementation decisions ("we'll use Postgres") unless they encode a
+  real constraint
+- Questions, opinions, side comments, agreements ("yeah", "ok", "great")
+- Generic chatter, meta-talk about the meeting itself
+- Things the speaker is hypothesizing or exploring, not committing to
 
 Output the requirement text in the same language as the source quote
 (de stays de, en stays en).
+
+For each candidate, INCLUDE an `is_requirement` boolean and a short
+`reasoning` (one sentence) — answer those FIRST inside your head before
+filling in `text`. If `is_requirement` is false, still include the entry
+so the filter can see your reasoning; the backend will drop it.
+
+`source_quote` MUST be the exact words copied from the TRANSCRIPT WINDOW —
+no paraphrasing, no shortening. If you can't quote it exactly, set
+`is_requirement` to false.
+
+`confidence` must reflect your real confidence (0.0–1.0). Use 0.5 if
+unsure. The backend will drop low-confidence items.
 
 SCHEMA
 {
   "requirements": [
     {
+      "is_requirement": true | false,
+      "reasoning": "<one sentence justifying the is_requirement decision>",
       "text": "<the requirement in the source language>",
       "category": "functional" | "non_functional",
       "source_quote": "<exact words from transcript>",
@@ -169,7 +190,7 @@ SCHEMA
   ]
 }
 
-If nothing new applies, return {"requirements": []}.
+If nothing applies, return {"requirements": []}.
 ```
 
 User message body:
@@ -208,9 +229,28 @@ class ExtractorWorker:
 - Build prompt with last 10 non-declined insights.
 - Call `client.chat(...)`.
 - Parse JSON; on parse fail or schema fail, log to stderr and continue.
-- Dedup: drop any whose `text.strip().lower()` matches an existing insight's `text.strip().lower()`. (Exact-text fallback layered under the prompt-side dedup.)
+- Run the **quality filter pipeline** (below) over the LLM's candidates.
 - For each survivor: create `Insight`, append to `session.insights`, broadcast over WS.
 - Errors (Ollama offline, model missing) → broadcast `{type:"ai_status", state:"offline"|"no_model"}`; continue trying next tick.
+
+### Quality filter pipeline
+
+Each candidate from the LLM passes through these gates in order. Failing any gate drops the candidate (logged at debug level for inspection; `reasoning` from the LLM is included in the log line so it's easy to see *why* the model thought something was or wasn't a requirement).
+
+| # | Gate | Drops |
+|---|---|---|
+| 1 | **`is_requirement` flag** | The LLM's own self-classification. `false` → drop. Cheapest filter; handles the LLM's own "this isn't really a requirement" decision. |
+| 2 | **Confidence threshold** | `confidence < EXTRACTOR_CONFIDENCE_FLOOR` → drop. Default `0.6`. Env-var configurable for A/B testing different models — some are calibrated tighter than others. |
+| 3 | **Source-quote validation** | The candidate's `source_quote` must appear in the recent transcript window. Implementation: fuzzy substring match (lowercased, punctuation-stripped) using `difflib.SequenceMatcher` against every segment in the window, ratio ≥ 0.75 → pass. Catches hallucinations: if the model invented a quote, it won't match. |
+| 4 | **Exact-text dedup** | `text.strip().lower()` already exists among non-declined `session.insights` → drop. Layered fallback under prompt-side dedup. |
+| 5 | **Schema sanity** | `category ∈ {"functional", "non_functional"}`, `language ∈ {"de", "en"}` (warn if other), non-empty `text` ≤ 500 chars. Pydantic-enforced. |
+
+All thresholds are env-var configurable so we can re-tune per model during A/B testing:
+- `EXTRACTOR_CONFIDENCE_FLOOR` (default `0.6`)
+- `EXTRACTOR_QUOTE_MATCH_RATIO` (default `0.75`)
+- `EXTRACTOR_REQUIRE_SOURCE_QUOTE` (default `true` — set to `false` to bypass gate 3 if a model produces poor quotes)
+
+The `reasoning` field from the LLM is **not stored on the Insight**; it's used in-process for logging and discarded.
 
 ### `backend/insights.py` — Insight model + state
 
@@ -347,10 +387,16 @@ ui/
 - `test_extractor.py`: stub `OllamaClient` to return canned JSON. Test:
   - Empty session → no calls to `chat`
   - Window builder picks segments within 30s
-  - Dedup drops exact-text duplicates
+  - Quality gate 1: `is_requirement=false` → dropped
+  - Quality gate 2: confidence below floor → dropped
+  - Quality gate 3: hallucinated source_quote (not in window) → dropped
+  - Quality gate 3: paraphrased-but-close source_quote (ratio ≥ 0.75) → kept
+  - Quality gate 4: exact-text duplicate of existing insight → dropped
+  - Quality gate 5: invalid category or empty text → dropped (pydantic)
   - Malformed JSON output → worker doesn't crash, no insights added
   - Skip-if-busy: simulate slow chat() and verify next tick is skipped
   - `idle` state → tick does nothing
+  - Env-var overrides (`EXTRACTOR_CONFIDENCE_FLOOR=0.4` raises pass rate)
 - `test_insights.py`: POST a segment, manually invoke worker tick logic, hit approve/decline/edit endpoints, verify WS broadcasts.
 
 ### Frontend
