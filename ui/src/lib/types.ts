@@ -7,6 +7,22 @@ export type Segment = {
   lang: string;
 };
 
+export type InsightType = "requirement" | "action_item" | "decision" | "chatter";
+
+export type InsightStatus = "pending" | "approved" | "rejected";
+
+export type Insight = {
+  id: string;
+  segment_id: string;
+  type: InsightType;
+  text: string;
+  source_quote: string;
+  language: string;
+  confidence: number;
+  needs_review: boolean;
+  status: InsightStatus;
+};
+
 export type RecordingState =
   | "idle"
   | "recording"
