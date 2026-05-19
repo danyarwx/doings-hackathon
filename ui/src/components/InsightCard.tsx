@@ -1,77 +1,137 @@
-import type { Insight, InsightType } from "../lib/types";
+import { useState } from "react";
+import { approveInsight, declineInsight, editInsight } from "../lib/api";
+import type { Insight } from "../lib/types";
 import { cn } from "../lib/utils";
 
-type Props = {
-  insight: Insight;
-  onApprove?: (id: string) => void;
-  onReject?: (id: string) => void;
-};
+type Props = { insight: Insight };
 
-const TYPE_LABEL: Record<InsightType, string> = {
-  requirement: "Requirement",
-  action_item: "Action item",
-  decision: "Decision",
-  chatter: "Chatter",
-};
+const CATEGORY_LABEL = {
+  functional: "Functional",
+  non_functional: "Non-functional",
+} as const;
 
-const TYPE_CLASS: Record<InsightType, string> = {
-  requirement: "bg-neon-cyan/15 text-neon-cyan border-neon-cyan/40",
-  action_item: "bg-neon-amber/15 text-neon-amber border-neon-amber/40",
-  decision: "bg-neon-green/15 text-neon-green border-neon-green/40",
-  chatter: "bg-white/10 text-white/50 border-white/20",
-};
+const CATEGORY_CLASS = {
+  functional: "bg-neon-cyan/15 text-neon-cyan border-neon-cyan/40",
+  non_functional: "bg-neon-amber/15 text-neon-amber border-neon-amber/40",
+} as const;
 
-export default function InsightCard({ insight, onApprove, onReject }: Props) {
+export default function InsightCard({ insight }: Props) {
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(insight.text);
+
   const acted = insight.status !== "pending";
+
+  const run = async (fn: () => Promise<unknown>) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fn();
+    } catch (err) {
+      console.error(err);
+      alert(String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleEditOpen = () => {
+    setDraft(insight.text);
+    setEditing(true);
+  };
+
+  const handleEditSave = () =>
+    run(async () => {
+      const t = draft.trim();
+      if (!t) return;
+      await editInsight(insight.id, t);
+      setEditing(false);
+    });
 
   return (
     <div
       className={cn(
         "rounded-xl border border-white/10 bg-white/5 p-3 transition-opacity",
-        acted && "opacity-50",
+        insight.status === "declined" && "opacity-40",
       )}
     >
       <div className="flex items-center justify-between gap-2 mb-2">
         <span
           className={cn(
             "px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-wider border",
-            TYPE_CLASS[insight.type],
+            CATEGORY_CLASS[insight.category],
           )}
         >
-          {TYPE_LABEL[insight.type]}
+          {CATEGORY_LABEL[insight.category]}
         </span>
-        {insight.needs_review && (
-          <span className="text-[10px] text-neon-amber/80 uppercase tracking-wider">
-            needs review
-          </span>
-        )}
         <span className="text-[10px] text-white/30 ml-auto tabular-nums">
           {(insight.confidence * 100).toFixed(0)}%
         </span>
       </div>
-      <p className="text-sm text-white leading-snug">{insight.text}</p>
-      {insight.source_quote && (
+
+      {editing ? (
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          rows={3}
+          className="w-full text-sm bg-black/40 border border-white/10 rounded-md px-2 py-1.5 text-white focus:outline-none focus:border-neon-cyan/60"
+        />
+      ) : (
+        <p className="text-sm text-white leading-snug">{insight.text}</p>
+      )}
+
+      {insight.source_quote && !editing && (
         <p className="mt-1.5 text-xs text-white/40 italic leading-snug">
           “{insight.source_quote}”
         </p>
       )}
-      {!acted && (
+
+      {!acted && !editing && (
         <div className="mt-3 flex gap-2">
           <button
-            onClick={() => onApprove?.(insight.id)}
-            className="flex-1 py-1.5 rounded-md text-xs font-medium bg-neon-green/15 text-neon-green border border-neon-green/30 hover:bg-neon-green/25 transition-colors"
+            onClick={() => run(() => approveInsight(insight.id))}
+            disabled={busy}
+            className="flex-1 py-1.5 rounded-md text-xs font-medium bg-neon-green/15 text-neon-green border border-neon-green/30 hover:bg-neon-green/25 disabled:opacity-50"
           >
             ✓ Approve
           </button>
           <button
-            onClick={() => onReject?.(insight.id)}
-            className="flex-1 py-1.5 rounded-md text-xs font-medium bg-neon-pink/15 text-neon-pink border border-neon-pink/30 hover:bg-neon-pink/25 transition-colors"
+            onClick={handleEditOpen}
+            disabled={busy}
+            className="flex-1 py-1.5 rounded-md text-xs font-medium bg-white/10 text-white border border-white/20 hover:bg-white/15 disabled:opacity-50"
           >
-            ✗ Reject
+            ✎ Edit
+          </button>
+          <button
+            onClick={() => run(() => declineInsight(insight.id))}
+            disabled={busy}
+            className="flex-1 py-1.5 rounded-md text-xs font-medium bg-neon-pink/15 text-neon-pink border border-neon-pink/30 hover:bg-neon-pink/25 disabled:opacity-50"
+          >
+            ✗ Decline
           </button>
         </div>
       )}
-      {acted && (
+
+      {editing && (
+        <div className="mt-3 flex gap-2">
+          <button
+            onClick={handleEditSave}
+            disabled={busy}
+            className="flex-1 py-1.5 rounded-md text-xs font-medium bg-neon-cyan/15 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/25 disabled:opacity-50"
+          >
+            Save
+          </button>
+          <button
+            onClick={() => setEditing(false)}
+            disabled={busy}
+            className="flex-1 py-1.5 rounded-md text-xs font-medium bg-white/10 text-white/70 border border-white/20 hover:bg-white/15 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {acted && !editing && (
         <p className="mt-2 text-[10px] text-white/40 uppercase tracking-wider">
           {insight.status}
         </p>
