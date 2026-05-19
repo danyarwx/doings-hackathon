@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import type { RecordingState, Segment, WsMessage } from "./types";
+import type { AiStatus, Insight, RecordingState, Segment, WsMessage } from "./types";
 
 export type SessionView = {
   state: RecordingState;
   sessionId: string | null;
   segments: Segment[];
+  insights: Insight[];
+  aiStatus: AiStatus;
 };
 
 const RECONNECT_BACKOFF_MS = [1000, 2000, 4000, 8000, 10000];
@@ -13,6 +15,8 @@ export function useSessionWs(): SessionView {
   const [state, setState] = useState<RecordingState>("disconnected");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [segments, setSegments] = useState<Segment[]>([]);
+  const [insights, setInsights] = useState<Insight[]>([]);
+  const [aiStatus, setAiStatus] = useState<AiStatus>("unknown");
   const attemptRef = useRef(0);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -40,17 +44,35 @@ export function useSessionWs(): SessionView {
         if (msg.type === "state") {
           setState(msg.state);
           setSessionId((prevId) => {
-            // New session id from backend → clear stale segments from the
-            // previous run. Same id (e.g. resume after pause) keeps them.
             if (msg.session_id && msg.session_id !== prevId) {
               setSegments([]);
+              setInsights([]);
             }
             return msg.session_id;
           });
         } else if (msg.type === "segment") {
           setSegments((prev) => [...prev, msg.segment]);
+        } else if (msg.type === "insight") {
+          setInsights((prev) => {
+            // Late snapshots may re-send; replace by id if present.
+            const idx = prev.findIndex((i) => i.id === msg.insight.id);
+            if (idx >= 0) {
+              const next = prev.slice();
+              next[idx] = msg.insight;
+              return next;
+            }
+            return [...prev, msg.insight];
+          });
+        } else if (msg.type === "insight_update") {
+          setInsights((prev) =>
+            prev.map((i) =>
+              i.id === msg.id ? { ...i, status: msg.status, text: msg.text } : i,
+            ),
+          );
+        } else if (msg.type === "ai_status") {
+          setAiStatus(msg.state);
         }
-        // "delivery" messages are still sent by the backend; ignored in this UI.
+        // "delivery" messages ignored in this UI.
       };
 
       ws.onclose = () => {
@@ -76,5 +98,5 @@ export function useSessionWs(): SessionView {
     };
   }, []);
 
-  return { state, sessionId, segments };
+  return { state, sessionId, segments, insights, aiStatus };
 }

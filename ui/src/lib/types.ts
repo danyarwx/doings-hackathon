@@ -21,21 +21,23 @@ export type PastSession = {
   segments: Segment[];
 };
 
-export type InsightType = "requirement" | "action_item" | "decision" | "chatter";
-
-export type InsightStatus = "pending" | "approved" | "rejected";
+export type InsightStatus = "pending" | "approved" | "declined";
+export type InsightCategory = "functional" | "non_functional";
 
 export type Insight = {
   id: string;
-  segment_id: string;
-  type: InsightType;
+  session_id: string;
+  category: InsightCategory;
   text: string;
+  original_text: string;
   source_quote: string;
   language: string;
   confidence: number;
-  needs_review: boolean;
   status: InsightStatus;
+  created_at_iso: string;
 };
+
+export type AiStatus = "ok" | "no_model" | "offline" | "unknown";
 
 export type RecordingState =
   | "idle"
@@ -47,4 +49,7 @@ export type RecordingState =
 export type WsMessage =
   | { type: "state"; state: Exclude<RecordingState, "disconnected">; session_id: string | null }
   | { type: "segment"; segment: Segment }
-  | { type: "delivery"; id: string; status: string; attempts: number };
+  | { type: "delivery"; id: string; status: string; attempts: number }
+  | { type: "insight"; insight: Insight }
+  | { type: "insight_update"; id: string; status: InsightStatus; text: string }
+  | { type: "ai_status"; state: Exclude<AiStatus, "unknown">; model: string; error?: string };
