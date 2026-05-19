@@ -7,7 +7,12 @@ export type Segment = {
   lang: string;
 };
 
-export type RecordingState = "idle" | "recording" | "stopping" | "disconnected";
+export type RecordingState =
+  | "idle"
+  | "recording"
+  | "paused"
+  | "stopping"
+  | "disconnected";
 
 export type WsMessage =
   | { type: "state"; state: Exclude<RecordingState, "disconnected">; session_id: string | null }

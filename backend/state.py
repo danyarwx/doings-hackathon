@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-RecordingState = Literal["idle", "recording", "stopping"]
+RecordingState = Literal["idle", "recording", "paused", "stopping"]
 DeliveryStatusValue = Literal["pending", "delivered", "failed"]
 
 

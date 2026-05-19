@@ -127,19 +127,24 @@ async def _monitor_capture(app: FastAPI) -> None:
     if proc is None:
         return
     await proc.wait()
-    # Capture exited (cleanly or otherwise) → return to idle.
-    app.state.capture_proc = None
-    app.state.session.recording_state = "idle"
-    await app.state.hub.broadcast({
-        "type": "state",
-        "state": "idle",
-        "session_id": app.state.session.session_id,
-    })
+    # If the subprocess died while we were already transitioning (pause/stop),
+    # those routes set the authoritative state — don't overwrite it here.
+    if app.state.session.recording_state == "recording":
+        app.state.capture_proc = None
+        app.state.session.recording_state = "idle"
+        await app.state.hub.broadcast({
+            "type": "state",
+            "state": "idle",
+            "session_id": app.state.session.session_id,
+        })
 
 
 @app.post("/control/start")
 async def control_start() -> dict:
-    if app.state.capture_proc is not None and app.state.capture_proc.returncode is None:
+    if (
+        app.state.session.recording_state == "recording"
+        or (app.state.capture_proc is not None and app.state.capture_proc.returncode is None)
+    ):
         raise HTTPException(status_code=409, detail="already recording")
     cmd = _capture_command()
     proc = await asyncio.create_subprocess_exec(
@@ -160,10 +165,33 @@ async def control_start() -> dict:
     return {"pid": proc.pid}
 
 
+@app.post("/control/pause")
+async def control_pause() -> dict:
+    proc = app.state.capture_proc
+    if proc is None or proc.returncode is not None or app.state.session.recording_state != "recording":
+        raise HTTPException(status_code=409, detail="not recording")
+    app.state.session.recording_state = "paused"
+    proc.send_signal(signal.SIGINT)
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=3.0)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+    app.state.capture_proc = None
+    await app.state.hub.broadcast({
+        "type": "state",
+        "state": "paused",
+        "session_id": app.state.session.session_id,
+    })
+    return {"paused": True}
+
+
 @app.post("/control/stop")
 async def control_stop() -> dict:
+    state = app.state.session.recording_state
     proc = app.state.capture_proc
-    if proc is None or proc.returncode is not None:
+    # Stop is valid from both recording and paused.
+    if state == "idle":
         raise HTTPException(status_code=409, detail="not recording")
     app.state.session.recording_state = "stopping"
     await app.state.hub.broadcast({
@@ -171,12 +199,13 @@ async def control_stop() -> dict:
         "state": "stopping",
         "session_id": app.state.session.session_id,
     })
-    proc.send_signal(signal.SIGINT)
-    try:
-        await asyncio.wait_for(proc.wait(), timeout=3.0)
-    except asyncio.TimeoutError:
-        proc.kill()
-        await proc.wait()
+    if proc is not None and proc.returncode is None:
+        proc.send_signal(signal.SIGINT)
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=3.0)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
     app.state.capture_proc = None
     app.state.session.recording_state = "idle"
     await app.state.hub.broadcast({
