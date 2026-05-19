@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
+from backend.insights import Insight
+
 RecordingState = Literal["idle", "recording", "paused", "stopping"]
 DeliveryStatusValue = Literal["pending", "delivered", "failed"]
 
@@ -32,6 +34,7 @@ class SessionState:
     session_id: str | None = None
     segments: list[Segment] = field(default_factory=list)
     deliveries: dict[str, DeliveryStatus] = field(default_factory=dict)
+    insights: list[Insight] = field(default_factory=list)
 
     def add_segment(self, seg: Segment) -> None:
         self.segments.append(seg)
@@ -48,5 +51,6 @@ class SessionState:
     def reset(self, session_id: str | None = None) -> None:
         self.segments = []
         self.deliveries = {}
+        self.insights = []
         self.session_id = session_id
         self.recording_state = "idle"
