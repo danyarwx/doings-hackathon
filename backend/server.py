@@ -111,15 +111,24 @@ async def _deliver_and_report(seg: Segment) -> None:
     })
 
 
-def _capture_command() -> list[str]:
+def _capture_command(language: str | None = None) -> list[str]:
     cmd_str = os.getenv("CAPTURE_CMD", DEFAULT_CAPTURE_CMD)
-    return shlex.split(cmd_str)
+    parts = shlex.split(cmd_str)
+    if language and "--language" not in parts:
+        parts += ["--language", language]
+    return parts
 
 
-def _capture_env() -> dict:
+def _capture_env(session_id: str) -> dict:
     env = dict(os.environ)
     env["PYTHONPATH"] = str(REPO_ROOT)
+    env["CAPTURE_SESSION_ID"] = session_id
     return env
+
+
+def _new_session_id() -> str:
+    from datetime import datetime
+    return "sess-" + datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
 async def _monitor_capture(app: FastAPI) -> None:
@@ -139,20 +148,35 @@ async def _monitor_capture(app: FastAPI) -> None:
         })
 
 
+class StartBody(BaseModel):
+    language: str | None = None
+
+
 @app.post("/control/start")
-async def control_start() -> dict:
+async def control_start(body: StartBody | None = None) -> dict:
     if (
         app.state.session.recording_state == "recording"
         or (app.state.capture_proc is not None and app.state.capture_proc.returncode is None)
     ):
         raise HTTPException(status_code=409, detail="already recording")
-    cmd = _capture_command()
+
+    language = body.language if body else None
+    resuming_from_paused = app.state.session.recording_state == "paused"
+    if not resuming_from_paused:
+        # Fresh session: clear segments + delivery state, mint a new id.
+        app.state.session.reset(session_id=_new_session_id())
+
+    session_id = app.state.session.session_id or _new_session_id()
+    if app.state.session.session_id is None:
+        app.state.session.session_id = session_id
+
+    cmd = _capture_command(language=language)
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
         cwd=str(REPO_ROOT),
-        env=_capture_env(),
+        env=_capture_env(session_id),
     )
     app.state.capture_proc = proc
     app.state.session.recording_state = "recording"
@@ -160,9 +184,9 @@ async def control_start() -> dict:
     await app.state.hub.broadcast({
         "type": "state",
         "state": "recording",
-        "session_id": app.state.session.session_id,
+        "session_id": session_id,
     })
-    return {"pid": proc.pid}
+    return {"pid": proc.pid, "session_id": session_id}
 
 
 @app.post("/control/pause")

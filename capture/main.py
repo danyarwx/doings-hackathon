@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import queue
 import signal
 import sys
@@ -97,7 +98,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
 
-    session_id = "sess-" + datetime.now().strftime("%Y%m%d-%H%M%S")
+    session_id = os.environ.get("CAPTURE_SESSION_ID") or (
+        "sess-" + datetime.now().strftime("%Y%m%d-%H%M%S")
+    )
     segment_counter = 0
 
     api_client: httpx.Client | None = None
