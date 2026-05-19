@@ -12,7 +12,7 @@ export default function App() {
       <div className="fixed inset-0 -z-10 pointer-events-none">
         <LightRays
           raysOrigin="top-center"
-          raysColor="#7AB8FF"
+          raysColor="#441fea"
           raysSpeed={1.0}
           lightSpread={0.9}
           rayLength={1.4}
