@@ -1,0 +1,6 @@
+pywhispercpp==1.0.0
+pytest==8.2.0
+numpy==1.26.4
+scipy==1.11.4
+sounddevice==0.4.6
+ffmpeg-python==0.2.0
