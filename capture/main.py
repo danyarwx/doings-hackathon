@@ -16,7 +16,11 @@ import httpx
 
 from capture.aggregator import ParagraphAggregator
 from capture.capture import list_input_devices, start_capture
-from capture.formatter import format_segment
+import sys as _sys
+if _sys.platform == "win32":
+    from capture.formatter_win import format_segment
+else:
+    from capture.formatter import format_segment
 from capture.segment import Segment
 from capture.transcribe import Transcriber
 from capture.utils import check_hardware_warnings
