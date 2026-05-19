@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { startSession, stopSession } from "../lib/api";
 import type { RecordingState } from "../lib/types";
-
-const WAVE_BARS = 14;
+import { VoicePoweredOrb } from "./ui/voice-powered-orb";
 
 type Props = { state: RecordingState };
 
@@ -26,7 +25,7 @@ export default function ControlBar({ state }: Props) {
   };
 
   return (
-    <div className="flex items-center justify-center gap-6 py-4">
+    <div className="flex items-center justify-center gap-6 py-2">
       <button
         onClick={() => handle(startSession)}
         disabled={busy || recording || stopping || disconnected}
@@ -36,7 +35,9 @@ export default function ControlBar({ state }: Props) {
         <span className="text-2xl text-white translate-x-[2px]">▶</span>
       </button>
 
-      <Wave active={recording} />
+      <div className="w-32 h-32">
+        <VoicePoweredOrb enableVoiceControl={recording} />
+      </div>
 
       <button
         onClick={() => handle(stopSession)}
@@ -46,28 +47,6 @@ export default function ControlBar({ state }: Props) {
       >
         <span className="text-2xl text-white">■</span>
       </button>
-    </div>
-  );
-}
-
-function Wave({ active }: { active: boolean }) {
-  return (
-    <div className="flex items-center gap-1 h-12 px-2">
-      {Array.from({ length: WAVE_BARS }).map((_, i) => (
-        <span
-          key={i}
-          className={
-            "w-1 rounded-full " +
-            (active
-              ? "bg-neon-cyan animate-wave"
-              : "bg-white/20")
-          }
-          style={{
-            height: active ? undefined : "20%",
-            animationDelay: `${(i * 80) % 600}ms`,
-          }}
-        />
-      ))}
     </div>
   );
 }

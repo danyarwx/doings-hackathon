@@ -21,13 +21,6 @@ export default {
       },
       animation: {
         "spin-slow": "spin 2s linear infinite",
-        wave: "wave 1s ease-in-out infinite",
-      },
-      keyframes: {
-        wave: {
-          "0%, 100%": { height: "20%" },
-          "50%": { height: "90%" },
-        },
       },
     },
   },
