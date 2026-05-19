@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shlex
-import signal
+import subprocess
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -18,10 +18,8 @@ from backend.state import Segment, SessionState
 DEFAULT_ENDPOINT = "https://staging.doings.de/stt"
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-CAPTURE_PYTHON = REPO_ROOT / "capture" / ".venv" / "bin" / "python"
-DEFAULT_CAPTURE_CMD = (
-    f"{CAPTURE_PYTHON} -m capture.main --api-url http://localhost:8000"
-)
+_win = (REPO_ROOT / ".venv" / "Scripts" / "python.exe")
+CAPTURE_PYTHON = _win if _win.exists() else (REPO_ROOT / ".venv" / "bin" / "python")
 
 
 class SegmentIn(BaseModel):
@@ -67,10 +65,13 @@ async def lifespan(app: FastAPI):
     app.state.past_sessions = []
     yield
     proc = app.state.capture_proc
-    if proc is not None and proc.returncode is None:
-        proc.send_signal(signal.SIGINT)
+    if proc is not None and proc.poll() is None:
+        proc.terminate()
         try:
-            await asyncio.wait_for(proc.wait(), timeout=3.0)
+            await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(None, proc.wait),
+                timeout=3.0,
+            )
         except asyncio.TimeoutError:
             proc.kill()
 
@@ -114,8 +115,16 @@ async def _deliver_and_report(seg: Segment) -> None:
 
 
 def _capture_command(language: str | None = None) -> list[str]:
-    cmd_str = os.getenv("CAPTURE_CMD", DEFAULT_CAPTURE_CMD)
-    parts = shlex.split(cmd_str)
+    cmd_str = os.getenv("CAPTURE_CMD")
+    if cmd_str:
+        parts = shlex.split(cmd_str, posix=(os.name != "nt"))
+    else:
+        parts = [
+            str(CAPTURE_PYTHON),
+            "-m", "capture.main",
+            "--api-url", "http://localhost:8000",
+            "--model", "tiny",
+        ]
     if language and "--language" not in parts:
         parts += ["--language", language]
     return parts
@@ -159,7 +168,7 @@ async def _monitor_capture(app: FastAPI) -> None:
     proc = app.state.capture_proc
     if proc is None:
         return
-    await proc.wait()
+    await asyncio.get_event_loop().run_in_executor(None, proc.wait)
     # If the subprocess died while we were already transitioning (pause/stop),
     # those routes set the authoritative state — don't overwrite it here.
     if app.state.session.recording_state == "recording":
@@ -180,7 +189,7 @@ class StartBody(BaseModel):
 async def control_start(body: StartBody | None = None) -> dict:
     if (
         app.state.session.recording_state == "recording"
-        or (app.state.capture_proc is not None and app.state.capture_proc.returncode is None)
+        or (app.state.capture_proc is not None and app.state.capture_proc.poll() is None)
     ):
         raise HTTPException(status_code=409, detail="already recording")
 
@@ -197,10 +206,10 @@ async def control_start(body: StartBody | None = None) -> dict:
         app.state.session.session_id = session_id
 
     cmd = _capture_command(language=language)
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.DEVNULL,
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=None,
         cwd=str(REPO_ROOT),
         env=_capture_env(session_id),
     )
@@ -218,15 +227,18 @@ async def control_start(body: StartBody | None = None) -> dict:
 @app.post("/control/pause")
 async def control_pause() -> dict:
     proc = app.state.capture_proc
-    if proc is None or proc.returncode is not None or app.state.session.recording_state != "recording":
+    if proc is None or proc.poll() is not None or app.state.session.recording_state != "recording":
         raise HTTPException(status_code=409, detail="not recording")
     app.state.session.recording_state = "paused"
-    proc.send_signal(signal.SIGINT)
+    proc.terminate()
     try:
-        await asyncio.wait_for(proc.wait(), timeout=3.0)
+        await asyncio.wait_for(
+            asyncio.get_event_loop().run_in_executor(None, proc.wait),
+            timeout=3.0,
+        )
     except asyncio.TimeoutError:
         proc.kill()
-        await proc.wait()
+        await asyncio.get_event_loop().run_in_executor(None, proc.wait)
     app.state.capture_proc = None
     await app.state.hub.broadcast({
         "type": "state",
@@ -249,13 +261,16 @@ async def control_stop() -> dict:
         "state": "stopping",
         "session_id": app.state.session.session_id,
     })
-    if proc is not None and proc.returncode is None:
-        proc.send_signal(signal.SIGINT)
+    if proc is not None and proc.poll() is None:
+        proc.terminate()
         try:
-            await asyncio.wait_for(proc.wait(), timeout=3.0)
+            await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(None, proc.wait),
+                timeout=3.0,
+            )
         except asyncio.TimeoutError:
             proc.kill()
-            await proc.wait()
+            await asyncio.get_event_loop().run_in_executor(None, proc.wait)
     app.state.capture_proc = None
     app.state.session.recording_state = "idle"
     await app.state.hub.broadcast({

@@ -44,7 +44,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+from transformers import pipeline
 
 # ---------------------------------------------------------------------------
 # Config
@@ -52,7 +52,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
 MODEL_ID: str = os.getenv(
     "MODEL",
-    "Qwen/Qwen3-8B",          # swap to "google/gemma-3-4b-it" as needed
+    "Qwen/Qwen3-0.6B",        # CPU-friendly; set MODEL=Qwen/Qwen3-8B for GPU
 )
 
 # How many segments to buffer before triggering extraction.
@@ -187,20 +187,13 @@ def load_model(model_id: str) -> Any:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype  = torch.float16 if device == "cuda" else torch.float32
 
-    tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id,
-        torch_dtype=dtype,
-        device_map="auto",       # spreads across all available GPUs / CPU
-        trust_remote_code=True,
-    )
-    model.eval()
-
     gen_pipeline = pipeline(
         "text-generation",
-        model=model,
-        tokenizer=tokenizer,
-        device_map="auto",
+        model=model_id,
+        torch_dtype=dtype,
+        device_map="auto" if device == "cuda" else None,
+        device=None if device == "cuda" else device,
+        trust_remote_code=True,
     )
     log.info("Model loaded on %s", device)
     return gen_pipeline

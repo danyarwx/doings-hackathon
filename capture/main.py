@@ -93,12 +93,49 @@ def parse_args() -> argparse.Namespace:
         "POSTed to {api_url}/segments fire-and-forget.",
     )
     p.add_argument("--list-devices", action="store_true", help="List input devices and exit")
+    p.add_argument(
+        "--extract",
+        action="store_true",
+        help="Run local LLM requirement extraction after each batch of segments.",
+    )
+    p.add_argument(
+        "--extract-model",
+        default=None,
+        help="HuggingFace model ID for extraction (default: Qwen/Qwen3-8B or MODEL env var).",
+    )
+    p.add_argument(
+        "--extract-every",
+        type=int,
+        default=4,
+        help="Trigger extraction every N segments (default: 4).",
+    )
     return p.parse_args()
+
+
+def _print_extraction(result: dict) -> None:
+    reqs = result.get("requirements", [])
+    actions = result.get("action_items", [])
+    decisions = result.get("decisions", [])
+    topics = result.get("topics", [])
+    if not (reqs or actions or decisions):
+        return
+    print("\n─── Extracted ─────────────────────────────────────────")
+    for r in reqs:
+        print(f"  [REQ]      {r.get('summary', '?')}  [{r.get('priority', '?')}]")
+    for a in actions:
+        owner = a.get("owner") or "unassigned"
+        dl = f"  by {a['deadline']}" if a.get("deadline") else ""
+        print(f"  [ACTION]   {a.get('task', '?')} → {owner}{dl}")
+    for d in decisions:
+        print(f"  [DECISION] {d.get('summary', '?')}")
+    if topics:
+        print(f"  [TOPICS]   {', '.join(topics)}")
+    print("────────────────────────────────────────────────────────\n", flush=True)
 
 
 def main() -> int:
     check_hardware_warnings()
-    
+
     args = parse_args()
 
     session_id = os.environ.get("CAPTURE_SESSION_ID") or (
@@ -132,6 +169,53 @@ def main() -> int:
         gain_target_dbfs=gain_target,
         silence_gate_dbfs=silence_gate,
     )
+
+    # --- optional LLM extraction setup ---
+    extractor_fn = None
+    if args.extract:
+        try:
+            import json as _json
+            from model import MODEL_ID as _DEFAULT_MODEL_ID, build_prompt, clean_json, load_model
+            ext_model_id = args.extract_model or os.environ.get("MODEL", _DEFAULT_MODEL_ID)
+            print(f"[extract] loading {ext_model_id} …", file=sys.stderr)
+            _ext_pipe = load_model(ext_model_id)
+            print("[extract] model ready.", file=sys.stderr)
+
+            _ext_buf: list[dict] = []
+            _ext_lock = threading.Lock()
+
+            def _run_extraction(batch: list[dict]) -> None:
+                transcript = " ".join(s["text"] for s in batch)
+                messages = build_prompt(transcript, ext_model_id)
+                try:
+                    outputs = _ext_pipe(
+                        messages, max_new_tokens=800, do_sample=False,
+                        temperature=None, top_p=None,
+                    )
+                    raw = outputs[0]
+                    if isinstance(raw, dict):
+                        generated = raw.get("generated_text", "")
+                        if isinstance(generated, list):
+                            generated = generated[-1].get("content", "")
+                    else:
+                        generated = str(raw)
+                    result = _json.loads(clean_json(generated))
+                except Exception as exc:
+                    print(f"[extract] failed: {exc}", file=sys.stderr)
+                    return
+                _print_extraction(result)
+
+            def extractor_fn(seg: Segment) -> None:
+                with _ext_lock:
+                    _ext_buf.append({"text": seg.text, "id": seg.id})
+                    if len(_ext_buf) >= args.extract_every:
+                        batch = list(_ext_buf)
+                        _ext_buf.clear()
+                        threading.Thread(target=_run_extraction, args=(batch,), daemon=True).start()
+
+        except ImportError as exc:
+            print(f"[extract] cannot load model.py deps: {exc}", file=sys.stderr)
+    # --- end extraction setup ---
 
     chunk_queue: "queue.Queue[tuple[float, object]]" = queue.Queue(maxsize=8)
     stop_event = threading.Event()
@@ -201,6 +285,8 @@ def main() -> int:
                 print(line, flush=True)
             segment_count += 1
         post_segment(seg)
+        if extractor_fn is not None:
+            extractor_fn(seg)
 
     def render_open(seg) -> None:
         if not tty:
