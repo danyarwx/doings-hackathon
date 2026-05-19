@@ -1,0 +1,58 @@
+SECTION,FIELD,Qwen3-8B,Phi-4 Mini 3.8B,Gemma 3 4B Instruct,Mistral 7B Instruct v0.3,Llama 3.1 8B Instruct,GPT-4o mini,Claude Haiku 3.5,Gemini 2.0 Flash
+OVERVIEW,Category,Local (Ollama),Local (Ollama),Local (Ollama),Local (Ollama),Local (Ollama),Cloud API,Cloud API,Cloud API
+OVERVIEW,Provider,Alibaba (2025),Microsoft (2025),Google (2025),Mistral AI,Meta (2024),OpenAI,Anthropic,Google
+OVERVIEW,Model Size (Q4_K_M quantized),~5 GB,~2.5 GB,~2.5 GB,~4.1 GB,~4.7 GB,N/A (cloud),N/A (cloud),N/A (cloud)
+OVERVIEW,RAM Required,8-10 GB,4-6 GB,5-7 GB,8 GB,8-10 GB,N/A,N/A,N/A
+OVERVIEW,Deployment Method,Ollama / gguf,Ollama / gguf,Ollama / gguf,Ollama / gguf,Ollama / gguf,REST API,REST API,REST API
+OVERVIEW,Offline Capable,Yes,Yes,Yes,Yes,Yes,No,No,No
+OVERVIEW,PRD Mentioned,Yes (system prompt uses /no_think),No (upgrade from Phi-3 mentioned in PRD),No,Yes (Step 3 primary suggestion),No,No,No,No
+,,,,,,,,,
+ACCURACY,German Language Quality (1-5),5 — Excellent bilingual DE/EN at 8B scale,4 — Good; weaker on complex DE jargon,4 — Solid multilingual from Google training,3 — Good EN; German noticeably weaker,3 — Strong EN; limited DE quality,5 — Excellent DE+EN,5 — Excellent DE+EN,5 — Excellent DE+EN
+ACCURACY,Structured JSON Output Reliability (1-5),5 — Best-in-class; /no_think removes reasoning noise from output,4 — Very reliable on structured prompts; distilled from larger models,4 — Reliable JSON; good instruction follow,4 — Proven JSON output; well-tested in production,4 — Good JSON; occasional schema drift on complex nested output,5 — Near-perfect JSON compliance,5 — Near-perfect JSON compliance,5 — Near-perfect JSON compliance
+ACCURACY,INVEST Schema Compliance,Excellent — reliably fills all fields including invest_validation flags,Good — fills most fields; invest_validation flags occasionally incomplete,Good — consistent on standard fields; invest flags need prompt reinforcement,Good — reliable on top-level fields; nested user_story sometimes misses context,Moderate — good on simple schemas; deeply nested INVEST structure causes occasional omissions,Excellent,Excellent,Excellent
+ACCURACY,Handling Messy / Code-Switched Transcripts (DE+EN mixed),Excellent — trained specifically for multilingual instruction following,Good — handles mixing well for its size,Good — Google multilingual training helps,Fair — tends to default to EN when transcript mixes languages,Fair — EN-centric; misses nuance in mixed DE/EN segments,Excellent,Excellent,Excellent
+ACCURACY,Context Window,32K tokens — handles full rolling meeting context,4K tokens — shorter; may truncate long meetings,8K tokens,32K tokens,128K tokens,128K tokens,200K tokens,1M tokens
+ACCURACY,Accuracy Score (weighted 1-5 x2 weight),5,4,4,4,3,5,5,5
+,,,,,,,,,
+LATENCY,Apple M1 / M2 (Metal acceleration),4-6 seconds,2-4 seconds,2-4 seconds,4-7 seconds,4-7 seconds,0.8-1.5 seconds,1-2 seconds,0.8-1.5 seconds
+LATENCY,NVIDIA RTX 3060 / T4 GPU,3-5 seconds,2-3 seconds,2-4 seconds,3-5 seconds,3-5 seconds,0.8-1.5 seconds,1-2 seconds,0.8-1.5 seconds
+LATENCY,CPU-only (Intel i7 / AMD Ryzen - no GPU),10-16 seconds,5-8 seconds,6-9 seconds,9-14 seconds,10-15 seconds,0.8-1.5 seconds,1-2 seconds,0.8-1.5 seconds
+LATENCY,Key Latency Optimization,/no_think flag removes chain-of-thought — saves 2-4s with no accuracy loss on JSON tasks,Smallest viable footprint — fast on any hardware,Moderate size — good balance,No equivalent of /no_think,No equivalent of /no_think,Cloud infrastructure — always fast,Cloud infrastructure — always fast,Cloud infrastructure — fastest of cloud options
+LATENCY,Meets 8-second UX target on GPU,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes
+LATENCY,Meets 8-second UX target on CPU-only,Borderline (10-16s) — use Phi-4 Mini as fallback,Yes (5-8s),Yes (6-9s),Borderline (9-14s),Borderline (10-15s),Yes,Yes,Yes
+LATENCY,Latency Score (weighted 1-5 x2 weight),4,5,4,4,3,5,5,5
+,,,,,,,,,
+PRIVACY,Audio Leaves Device,Never — fully on-device,Never — fully on-device,Never — fully on-device,Never — fully on-device,Never — fully on-device,Never (text only sent),Never (text only sent),Never (text only sent)
+PRIVACY,Transcript Text Leaves Device,Never,Never,Never,Never,Never,Yes — sent to OpenAI servers,Yes — sent to Anthropic servers,Yes — sent to Google servers
+PRIVACY,Suitable for Telekom / Siemens / VW,Yes — hard privacy requirement met,Yes — hard privacy requirement met,Yes — hard privacy requirement met,Yes — hard privacy requirement met,Yes — hard privacy requirement met,No — transcript text leaves device; likely contractual blocker,No — transcript text leaves device; likely contractual blocker,No — transcript text leaves device; likely contractual blocker
+PRIVACY,Enterprise Data Processing Agreement Available,N/A (no data egress),N/A (no data egress),N/A (no data egress),N/A (no data egress),N/A (no data egress),Yes (OpenAI DPA) but still cloud,Yes (Anthropic DPA) but still cloud,Yes (Google DPA) but still cloud
+PRIVACY,Offline Operation Supported,Yes,Yes,Yes,Yes,Yes,No — requires internet,No — requires internet,No — requires internet
+PRIVACY,Privacy Score (weighted 1-5 x1.5 weight),5,5,5,5,5,2 — text egress is a hard blocker for regulated clients,2 — text egress is a hard blocker for regulated clients,2 — text egress is a hard blocker for regulated clients
+,,,,,,,,,
+COST,Cost Per Extraction Call,~$0.00 (electricity only),~$0.00 (electricity only),~$0.00 (electricity only),~$0.00 (electricity only),~$0.00 (electricity only),~$0.00030 per call,~$0.00080 per call,~$0.00010 per call
+COST,Cost — 1 client 1 meeting/day (~40 calls/day),$0.00,$0.00,$0.00,$0.00,$0.00,~$0.012/day,~$0.032/day,~$0.004/day
+COST,Cost — 10 clients 2 meetings/day (~800 calls/day),$0.00,$0.00,$0.00,$0.00,$0.00,~$0.24/day,~$0.64/day,~$0.08/day
+COST,Cost — 100 clients 3 meetings/day (~12000 calls/day),$0.00,$0.00,$0.00,$0.00,$0.00,~$3.60/day / ~$108/mo,~$9.60/day / ~$288/mo,~$1.20/day / ~$36/mo
+COST,Cost — 1000 clients at scale (~120000 calls/day),$0.00,$0.00,$0.00,$0.00,$0.00,~$36/day / ~$1080/mo,~$96/day / ~$2880/mo,~$12/day / ~$360/mo
+COST,One-time Setup Cost,~5 GB download (one-time per machine),~2.5 GB download (one-time per machine),~2.5 GB download (one-time per machine),~4.1 GB download (one-time per machine),~4.7 GB download (one-time per machine),None (API key),None (API key),None (API key)
+COST,Cost Score (weighted 1-5 x1.5 weight),5,5,5,5,5,3,2,4
+,,,,,,,,,
+OVERALL SCORES,Accuracy Score (raw 1-5),5,4,4,4,3,5,5,5
+OVERALL SCORES,Latency Score (raw 1-5),4,5,4,4,3,5,5,5
+OVERALL SCORES,Privacy Score (raw 1-5),5,5,5,5,5,2,2,2
+OVERALL SCORES,Cost Score (raw 1-5),5,5,5,5,5,3,2,4
+OVERALL SCORES,Cost Score (weighted 1-5 x1.5 weight),33.5,32.5,31.5,30.5,28,26.5,25,27.5
+OVERALL SCORES,Rank,1st — Primary Pick (GPU),2nd — Primary Pick (CPU-only),3rd — Solid Alternative,4th — Acceptable (already in PRD),5th — Weaker German,6th — Demo/dev only,8th — Demo/dev only,7th — Demo/dev only
+,,,,,,,,,
+RECOMMENDATION,Recommended Use Case,Default deployment on GPU or Apple Silicon machines,Default deployment on CPU-only or RAM-constrained machines (under 10 GB),Alternative to Phi-4 Mini if availability issues; same size class,Acceptable if team already has it running; not recommended for new setups,Not recommended — weaker DE support undermines primary use case,Development and hackathon demo only — never for real client data,Development only — most expensive cloud option,Hackathon demo fallback — cheapest and fastest cloud option
+RECOMMENDATION,When to Switch Away,If demo hardware is CPU-only with under 10 GB RAM â€” use Phi-4 Mini instead,If meeting transcripts are heavily complex German technical content â€” consider Qwen3-8B on GPU,If Phi-4 Mini is preferred and available in Ollama stable â€” use that instead,When shipping to production â€” migrate to Qwen3-8B for better DE quality and /no_think,Not recommended for this use case,When any enterprise client data is involved,When any enterprise client data is involved,When any enterprise client data is involved
+RECOMMENDATION,Ollama Pull Command,ollama pull qwen3:8b,ollama pull phi4-mini,ollama pull gemma3:4b,ollama pull mistral,ollama pull llama3.1:8b,N/A — API key required,N/A — API key required,N/A — API key required
+RECOMMENDATION,format:json Support in Ollama (enforces valid JSON at sampling level),Yes,Yes,Yes,Yes,Yes,Yes (via response_format),Yes (via tool_use / json mode),Yes (via response_mime_type)
+RECOMMENDATION,/no_think Optimization Available,Yes — major latency saving for JSON tasks,No — not needed; model is already fast,No,No,No,No,No,No
+,,,,,,,,,
+INTEGRATION NOTES,Auto-select Logic,if (has_gpu or has_metal) and ram_gb >= 10 â†’ qwen3:8b,if ram_gb < 10 or no GPU ? phi4-mini,Alternative fallback if phi4-mini unavailable,Manual selection only,Manual selection only,Manual only,Manual only,Manual only
+INTEGRATION NOTES,Hardware Detection Code Required,Yes â€” psutil + torch.cuda.is_available() + Metal check,Yes â€” same detection logic (secondary path),Yes â€” same detection logic,No,No,No,No,No
+,,,,,,,,,
+RISKS,Primary Risk,10-16s on CPU-only machines breaks live UX,German accuracy gap on highly technical domain vocabulary,Slightly less proven than Phi-4 Mini on structured output tasks,Weaker German — clients speaking DE-heavy meetings may see quality drop,Poor German support makes it unsuitable as primary for this product,Transcript text leaves device â€” contractual blocker for Telekom/Siemens/VW,Most expensive cloud option â€” unsustainable at scale,Transcript text leaves device â€” same legal blocker as other cloud options
+RISKS,Risk Mitigation,Auto-detect CPU-only â†’ load Phi-4 Mini instead; test on actual demo laptop before event,Add domain glossary to system prompt; Whisper prompt hints help at STT layer,Validate against Phi-4 Mini on DE test transcripts before committing,Add German test cases during dev; switch to Qwen3-8B before any DE-heavy client,Do not use for this product,Do not use for real client data under any circumstances,Do not use â€” cost at 100+ clients is unjustifiable vs free local models,Do not use for real client data; acceptable for hackathon demo day only
+RISKS,RAM Conflict with Whisper Model Running Simultaneously,Qwen3-8B (5 GB) + ggml-small (244 MB) = fine on 10 GB; tight on 8 GB,Phi-4 Mini (2.5 GB) + ggml-small (244 MB) = comfortable on 6 GB,Gemma 3 4B (2.5 GB) + ggml-small (244 MB) = comfortable on 6 GB,Mistral 7B (4.1 GB) + ggml-small (244 MB) = fine on 8 GB,Llama 3.1 8B (4.7 GB) + ggml-small (244 MB) = tight on 8 GB,No local RAM impact,No local RAM impact,No local RAM impact
