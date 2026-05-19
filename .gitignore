@@ -14,3 +14,10 @@ capture/models/
 # IDE
 .vscode/
 .idea/
+
+# Backend
+backend/.venv/
+
+# Node
+ui/node_modules/
+ui/dist/

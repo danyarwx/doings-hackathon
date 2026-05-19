@@ -1,27 +1,35 @@
 # PRD: Local Meeting Intelligence — Doings.ai × CF Hackathon 2026
 
-**Version:** 1.1 (roadmap added)
-**Team:** 3 people · 3 lanes · 3 milestones
-**Status:** Ready to build
-**Stack:** Angular + TypeScript · whisper.cpp · FastAPI · pyannote-audio
+**Version:** 1.2 (frontend retargeted; roadmap intact)
+**Team:** 3 people · 3 lanes · 4 milestones
+**Status:** Step 1 shipped; Step 2 in build
+**Stack:** React 18 + Vite + TypeScript + Tailwind · pywhispercpp (whisper.cpp) · FastAPI · pyannote-audio (stretch)
 
 ---
 
-## What changed from v0.2
+## 0. What changed in v1.2
 
-The official brief locks in several decisions that override earlier assumptions:
+Building Step 1 surfaced two decisions worth changing in v1.1:
+
+| Topic | v1.1 | v1.2 |
+|---|---|---|
+| Frontend | Angular + TS | **React 18 + Vite + TS + Tailwind** — faster path to the Vision-UI-inspired dashboard aesthetic; no Angular dark-theme kit matches the supplied reference. The PRD architecture (FastAPI bridge, WS, HTTPS POST) is unchanged. |
+| STT integration | whisper.cpp as a C++ subprocess | **pywhispercpp** — bundles the same whisper.cpp binary, loads the model once in-process, avoids per-chunk subprocess overhead. Required Python 3.10+. |
+| Roadmap scope | LLM was out of scope | LLM is now **Step 3** in the roadmap (see §9). Hackathon target expanded after the brief evolved. |
+
+## What changed from v0.2 → v1.0
 
 | Topic | v0.2 assumption | v1.0 (official) |
 |---|---|---|
-| Frontend | Next.js | **Angular** |
-| STT engine | faster-whisper (Python) | **whisper.cpp** (C++ subprocess) |
+| Frontend | Next.js | Angular (later revised to React in v1.2) |
+| STT engine | faster-whisper (Python) | **whisper.cpp** (now via pywhispercpp wrapper in v1.2) |
 | Backend | Next.js API routes | **FastAPI** (Python) |
-| LLM extraction | Ollama / Mistral local | **Out of scope** — handled downstream by Doings |
+| LLM extraction | Ollama / Mistral local | Out of scope (revised in v1.2: now Step 3) |
 | Delivery endpoint | export JSON only | **POST to `staging.doings.de/stt`** |
-| Approve/reject UI | in scope | **Out of scope** — downstream Doings problem |
+| Approve/reject UI | in scope | Step 3 (LLM analysis ships with approve/reject cards) |
 | Packaging | none | **PyInstaller .exe** (stretch) / **Electron** (stretch) |
 
-The hackathon scope is strictly: **Capture → STT → Fan-out.** Structured extraction and approval flows are Doings' existing pipeline — not our problem to build.
+The hackathon scope through Step 2 is: **Capture → STT → Fan-out**. Steps 3–4 layer local LLM analysis and structured-requirement generation on top.
 
 ---
 
@@ -128,32 +136,31 @@ breaks. This is intentional — modular by design.
 
 ## 6. Component specifications
 
-### 01 — Angular UI
-**Tech:** Angular · TypeScript
+### 01 — React UI
+**Tech:** React 18 · Vite · TypeScript · Tailwind CSS
+**Style:** Vision-UI-inspired dark/glassy aesthetic (see [docs/superpowers/specs/2026-05-18-step2-web-ui-design.md](docs/superpowers/specs/2026-05-18-step2-web-ui-design.md) for the full design)
 **Runs:** localhost, browser (Electron shell as stretch)
 
 Responsibilities:
 - Live transcript stream — segments appear as they arrive over WebSocket from FastAPI
 - Delivery status panel — shows confirmed / pending / failed for each segment's HTTPS POST
-- Session controls — Start, Stop, Export session as JSON
-- Inline transcript editing — click any segment to correct it during the meeting
+- AI insights panel — placeholder in Step 2; populated by Step 3's LLM extraction
+- Session controls — Start, Stop, Export session as JSON. Start/Stop hit `POST /control/*` on the backend, which spawns/SIGINTs the capture subprocess.
+- Inline transcript editing — deferred (originally PRD scope; not demo-critical)
 - Speaker chips — appear when diarization annotates a segment (stretch, non-blocking)
 
-Layout:
+Layout (3-column on desktop, stacks on narrow viewports):
 ```
-┌──────────────────────────────────────────────────────────┐
-│  ● Recording  00:14:32   Segments: 47   Delivered: 46    │
-├─────────────────────────┬────────────────────────────────┤
-│  LIVE TRANSCRIPT        │  DELIVERY STATUS               │
-│                         │                                │
-│  [00:12.4] [DE]         │  seg-047  ✓ delivered          │
-│  Das System muss...     │  seg-046  ✓ delivered          │
-│                         │  seg-045  ⟳ retrying...        │
-│  [00:17.0] [EN]         │  seg-044  ✓ delivered          │
-│  Auth should use        │                                │
-│  OAuth 2.0.             │                                │
-│                         │                                │
-│  [editing...]           │                                │
+┌──────────────────────────────────────────────────────────────────────┐
+│  ● Recording  00:14:32   Segments: 47   Delivered: 46/47   [▶][■][↓] │
+├──────────────────────┬───────────────────────┬───────────────────────┤
+│  LIVE TRANSCRIPT     │  DELIVERY STATUS      │  AI INSIGHTS          │
+│  (col-span 6)        │  (col-span 3)         │  (col-span 3)         │
+│                      │                       │                       │
+│  [00:12.4] [DE]      │  seg-047  ✓           │   Step 3 placeholder  │
+│  Das System muss...  │  seg-046  ✓           │                       │
+│                      │  seg-045  ⟳           │                       │
+│  [00:17.0] [EN]      │  seg-044  ✓           │                       │
 ├─────────────────────────┴────────────────────────────────┤
 │  [Start]  [Stop]  [Export]                               │
 └──────────────────────────────────────────────────────────┘
@@ -172,8 +179,8 @@ Responsibilities:
 **Mic is the contract.** System audio is the bonus. Never block the demo on loopback capture.
 
 ### 03 — Transcription worker
-**Tech:** whisper.cpp (C++ binary, called as subprocess)
-**Runs:** local subprocess, no network
+**Tech:** `pywhispercpp` (Python bindings bundling the whisper.cpp binary)
+**Runs:** in-process inside the capture service, Metal-accelerated on Apple Silicon, no network
 
 Responsibilities:
 - Consume PCM/WAV chunks from the capture service
@@ -251,12 +258,13 @@ Responsibilities:
 
 ## 7. Key technical decisions
 
-**Angular + localhost, not a cloud app.** Same Angular code works in a browser today and
-in an Electron shell later — without touching the helper process. This is the migration path
-to a packaged desktop app.
+**React + localhost, not a cloud app.** The same React + Vite + Tailwind code runs in a browser
+today and wraps into an Electron shell later — without touching the capture or backend processes.
+This is the migration path to a packaged desktop app.
 
-**whisper.cpp, not faster-whisper.** The C++ implementation is faster on CPU, has no Python
-runtime dependency for the binary, and is the right foundation for a PyInstaller-packaged `.exe`.
+**whisper.cpp via pywhispercpp.** The C++ implementation is faster on CPU and Metal-accelerated on
+Apple Silicon. Wrapping it with pywhispercpp lets us load the model once in-process (no per-chunk
+subprocess overhead) while still being the right foundation for a PyInstaller-packaged `.exe`.
 
 **Mic is the guaranteed path.** System audio capture is OS-specific and fragile. The demo
 is built around mic input. Loopback audio is a bonus added only after mic path is solid.
@@ -273,23 +281,26 @@ Pointing at prod, a mock, or a different vendor requires no code change.
 
 Three people, three lanes — blockers in one lane don't cascade to others.
 
-### Person 01 — Angular UI
-- Angular shell with live transcript view (WebSocket consumer)
+### Person 01 — React UI
+- Vite + React + TS + Tailwind shell with the Vision-UI-inspired dark/glassy style
+- Live transcript view (WebSocket consumer)
 - Delivery status panel
-- Session controls: Start / Stop / Export
-- Inline segment editing
+- AI insights panel (placeholder in Step 2; populated in Step 3)
+- Session controls: Start / Stop / Export — Start/Stop hit `POST /control/*` on the backend
 - Speaker chips (stretch)
 
 ### Person 02 — Capture + STT
 - Audio capture helper (mic first, loopback second)
-- Chunk normalization to PCM/WAV
-- whisper.cpp integration and subprocess management
-- Timestamped transcript API exposed to FastAPI
+- Chunk normalization with 200ms overlap
+- pywhispercpp integration (model loaded once in-process)
+- `--api-url` flag: POST each Segment to the backend
+- Stable `seg-NNN` IDs + `session_id` per run
 
 ### Person 03 — Backend + Delivery
-- FastAPI skeleton and WebSocket server
-- HTTPS forwarder to `staging.doings.de/stt`
-- Retry logic and delivery status events
+- FastAPI skeleton, WebSocket server, control endpoints
+- `POST /control/start` / `stop` — manages the capture subprocess lifecycle
+- HTTPS forwarder to `staging.doings.de/stt` (env-configurable `DOINGS_ENDPOINT`)
+- Retry logic and per-segment delivery status events over WS
 - Diarization merge into transcript segments (stretch)
 
 ---

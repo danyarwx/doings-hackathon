@@ -1,25 +1,35 @@
 # capture — Step 1: Terminal Live STT
 
-Mic → whisper.cpp → timestamped lines in the terminal. Fully offline.
+Mic → whisper.cpp → timestamped paragraphs in the terminal. Fully offline.
 
 ## Setup (macOS Apple Silicon)
 
+Requires **Python 3.10+** (pywhispercpp doesn't run on 3.9). On macOS:
+
 ```bash
-cd capture
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+# install Python 3.10+ if you don't have it
+brew install python@3.14
 ```
 
-First run downloads the `ggml-medium` model (~769MB) into `capture/models/`.
+Create the venv and install dependencies:
+
+```bash
+cd /path/to/doings
+/opt/homebrew/bin/python3.14 -m venv capture/.venv
+capture/.venv/bin/pip install -r capture/requirements.txt
+```
+
+First run downloads `ggml-medium` (~769MB) into `capture/models/`.
 
 ## Run
 
+From the repo root:
+
 ```bash
-python -m capture.main
+PYTHONPATH=. capture/.venv/bin/python -m capture.main
 ```
 
-Speak. Lines appear like:
+Speak. One line per whisper segment:
 
 ```
 [00:12.4 → 00:15.1] [DE] Das System muss mindestens 500 Nutzer unterstützen.
@@ -30,25 +40,78 @@ Press Ctrl-C to stop.
 
 ## Options
 
+### Model and device
+
 ```bash
-python -m capture.main --model small      # smaller, faster, less accurate
-python -m capture.main --model medium     # default
-python -m capture.main --device 2         # pick a specific input device
-python -m capture.main --list-devices     # print available input devices
+--model small | medium | large-v3   # whisper model (default: medium)
+--device N                          # input device index (default: system mic)
+--list-devices                      # print available input devices and exit
+```
+
+### Language
+
+```bash
+--language de                       # force German (skip auto-detect)
+--language en                       # force English
+# default: auto-detect per chunk
+```
+
+Whisper's auto-detect can be biased toward English on short utterances. Force the language for single-language sessions to get accurate transcripts and language tags.
+
+### Paragraph grouping (experimental, off by default)
+
+Whisper emits short fragmented segments; the aggregator can combine them into paragraphs that end on silence, language switches, or a duration cap. **Default is one line per raw segment** — paragraph mode is opt-in:
+
+```bash
+--paragraphs                        # enable paragraph grouping
+--paragraph-gap-s 1.5               # silence (s) that ends a paragraph (default: 1.5)
+--max-paragraph-s 30.0              # max paragraph duration before forced split (default: 30)
+```
+
+In a TTY with `--paragraphs`, the current paragraph grows in-place on the same line as new segments arrive; when a boundary fires, the paragraph commits (newline) and the next one starts on a fresh row.
+
+### Audio preprocessing
+
+```bash
+--gain-target-dbfs -25.0            # RMS-normalize chunks to this dBFS (default: -25)
+--no-normalize                      # disable RMS normalization
+--silence-gate-dbfs -45.0           # skip chunks quieter than this (default: -45)
+--no-silence-gate                   # disable the silence gate
+```
+
+The silence gate prevents whisper from hallucinating fillers like `[sigh]` on quiet background noise. Raise toward `-35` to gate more aggressively; lower toward `-55` if quiet speech gets dropped.
+
+### Vocabulary hints
+
+Bias whisper toward specific terms (product names, acronyms, names):
+
+```bash
+--prompt "OAuth 2.0, Telekom, Kubernetes, REST"
+--prompt-file vocab.txt             # read prompt from a file (overrides --prompt)
 ```
 
 ## Manual acceptance test
 
-1. Run `python -m capture.main`.
-2. Wait for `model loaded.` on stderr.
-3. Speak: "Das System muss mindestens 500 Nutzer unterstützen."
-4. Within ~3s, a line should appear tagged `[DE]` with the German text.
-5. Speak: "Authentication should use OAuth 2.0."
-6. Within ~3s, a line should appear tagged `[EN]` with the English text.
-7. Press Ctrl-C. Final summary line on stderr.
+1. Run `PYTHONPATH=. capture/.venv/bin/python -m capture.main --language de`.
+2. Wait for `[transcribe] model loaded.` on stderr.
+3. Speak: *"Das System muss mindestens fünfhundert Nutzer unterstützen."*
+4. Pause ~2 seconds.
+5. Speak: *"Die Authentifizierung sollte OAuth verwenden."*
+6. Within ~4s of finishing each utterance, a `[DE]` paragraph appears on stdout.
+7. Press Ctrl-C. Final summary line (`[main] stopped. transcribed N segments…`) on stderr.
+
+For an English-only run, swap `--language de` for `--language en`. For an auto-detect run (German bias may suffer on short utterances), omit `--language` entirely.
 
 ## Tests
 
 ```bash
-pytest capture/tests
+PYTHONPATH=. capture/.venv/bin/pytest capture/tests -v
 ```
+
+## Troubleshooting
+
+- **`ModuleNotFoundError: No module named 'capture'`** — run from the repo root with `PYTHONPATH=.`.
+- **`pywhispercpp.utils:195 ... unsupported operand type(s) for |`** — your venv is Python 3.9. Recreate it with 3.10+ (`brew install python@3.14`, then rebuild the venv).
+- **Auto-detect tags German as `[EN]`** — known whisper bias on short chunks. Use `--language de` for German-only sessions.
+- **Garbled output / `[sigh]` / `[music]` artifacts** — raise `--silence-gate-dbfs` (e.g. to `-35`) or check mic levels.
+- **No transcript output at all** — confirm mic permission was granted; re-check with `--list-devices` and pass `--device N`.
