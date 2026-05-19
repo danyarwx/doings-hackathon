@@ -1,5 +1,9 @@
-export async function startSession(): Promise<void> {
-  const r = await fetch("/api/control/start", { method: "POST" });
+export async function startSession(opts: { language?: string | null } = {}): Promise<void> {
+  const r = await fetch("/api/control/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ language: opts.language ?? null }),
+  });
   if (!r.ok) throw new Error(`start failed: ${r.status}`);
 }
 
