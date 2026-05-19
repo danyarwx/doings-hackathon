@@ -63,6 +63,8 @@ async def lifespan(app: FastAPI):
     app.state.hub = Hub()
     app.state.endpoint = os.getenv("DOINGS_ENDPOINT", DEFAULT_ENDPOINT)
     app.state.capture_proc = None
+    # In-memory list of finished sessions (PRD forbids persistence).
+    app.state.past_sessions = []
     yield
     proc = app.state.capture_proc
     if proc is not None and proc.returncode is None:
@@ -131,6 +133,28 @@ def _new_session_id() -> str:
     return "sess-" + datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
+def _archive_current_session(app: FastAPI) -> None:
+    s: SessionState = app.state.session
+    if s.session_id is None or not s.segments:
+        return
+    languages = sorted({seg.lang for seg in s.segments})
+    duration_s = (s.segments[-1].end_s - s.segments[0].start_s) if s.segments else 0.0
+    snapshot = {
+        "session_id": s.session_id,
+        "ended_at_iso": _utc_iso_now(),
+        "segment_count": len(s.segments),
+        "duration_s": round(duration_s, 1),
+        "languages": languages,
+        "segments": [_segment_to_dict(seg) for seg in s.segments],
+    }
+    app.state.past_sessions.insert(0, snapshot)  # newest first
+
+
+def _utc_iso_now() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 async def _monitor_capture(app: FastAPI) -> None:
     proc = app.state.capture_proc
     if proc is None:
@@ -163,6 +187,8 @@ async def control_start(body: StartBody | None = None) -> dict:
     language = body.language if body else None
     resuming_from_paused = app.state.session.recording_state == "paused"
     if not resuming_from_paused:
+        # Archive the just-finished session before wiping it.
+        _archive_current_session(app)
         # Fresh session: clear segments + delivery state, mint a new id.
         app.state.session.reset(session_id=_new_session_id())
 
@@ -263,6 +289,34 @@ async def export_session() -> dict:
         "session_id": s.session_id,
         "segments": [_segment_to_dict(seg) for seg in s.segments],
     }
+
+
+@app.get("/history")
+async def list_history() -> dict:
+    return {
+        "sessions": [
+            {
+                "session_id": h["session_id"],
+                "ended_at_iso": h["ended_at_iso"],
+                "segment_count": h["segment_count"],
+                "duration_s": h["duration_s"],
+                "languages": h["languages"],
+            }
+            for h in app.state.past_sessions
+        ],
+    }
+
+
+@app.get("/history/{session_id}")
+async def get_history_session(session_id: str) -> dict:
+    for h in app.state.past_sessions:
+        if h["session_id"] == session_id:
+            return {
+                "session_id": h["session_id"],
+                "ended_at_iso": h["ended_at_iso"],
+                "segments": h["segments"],
+            }
+    raise HTTPException(status_code=404, detail="session not found")
 
 
 @app.post("/segments", status_code=202)

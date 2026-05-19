@@ -7,6 +7,20 @@ export type Segment = {
   lang: string;
 };
 
+export type PastSessionSummary = {
+  session_id: string;
+  ended_at_iso: string;
+  segment_count: number;
+  duration_s: number;
+  languages: string[];
+};
+
+export type PastSession = {
+  session_id: string;
+  ended_at_iso: string;
+  segments: Segment[];
+};
+
 export type InsightType = "requirement" | "action_item" | "decision" | "chatter";
 
 export type InsightStatus = "pending" | "approved" | "rejected";
