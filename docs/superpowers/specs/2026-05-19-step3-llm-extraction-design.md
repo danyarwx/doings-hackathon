@@ -9,10 +9,10 @@
 
 ## Goal
 
-While the user is recording, a local LLM reads the rolling 60-second transcript every 10 seconds and proposes software requirements. Each proposed requirement appears in the AI Insights panel as a card with **Approve / Edit / Decline** controls. The user curates the list in real time.
+While the user is recording, a local LLM reads the rolling 30-second transcript every 5 seconds and proposes software requirements. Each proposed requirement appears in the AI Insights panel as a card with **Approve / Edit / Decline** controls. The user curates the list in real time.
 
 **Done when:**
-1. Speaking *"Das System muss mindestens 500 Nutzer unterstützen"* produces a `[functional]` requirement card within ~15s of the utterance ending.
+1. Speaking *"Das System muss mindestens 500 Nutzer unterstützen"* produces a `[functional]` requirement card within ~8s of the utterance ending (typical), ~11s worst case.
 2. Clicking **Approve** persists the card as approved for the session.
 3. Clicking **Edit** flips the card to an inline textarea; saving updates the text and keeps the card pending.
 4. Clicking **Decline** dismisses the card (visually de-emphasized; recorded as declined).
@@ -34,7 +34,7 @@ While the user is recording, a local LLM reads the rolling 60-second transcript 
 ## Stack
 
 - **LLM runner:** [Ollama](https://ollama.com), local HTTP server at `http://localhost:11434`. Metal-accelerated on Apple Silicon.
-- **Default model:** `mistral` (Mistral 7B Instruct, 4-bit, ~4GB). Configurable via env var `OLLAMA_MODEL`. Other tested-supported values: `phi3`, `llama3.1`, `qwen2.5`.
+- **Default model:** `phi3` (Phi-3-mini, ~2.4GB, ~1.5–3s per call). Chosen for the demo latency budget. Configurable via env var `OLLAMA_MODEL`. Higher-quality alternatives we expect to A/B test: `mistral` (3–5s/call, stronger German), `llama3.1` (5–7s/call, best reasoning), `qwen2.5`.
 - **Communication:** Ollama's `POST /api/chat` with `format: "json"` for guaranteed JSON output.
 - **Async HTTP:** existing `httpx.AsyncClient` (already in `backend/`).
 
@@ -53,7 +53,7 @@ No new Python dependencies — `httpx` and `pydantic` are already installed.
 │                  ┌───────────────────────────────────┐               │
 │                  │  ExtractorWorker  (asyncio.Task)  │               │
 │                  │  - started in lifespan            │               │
-│                  │  - tick every 10s                 │               │
+│                  │  - tick every 5s                 │               │
 │                  │  - runs only when recording_state │               │
 │                  │    == "recording"                 │               │
 │                  └─────────┬─────────────────────────┘               │
@@ -61,7 +61,7 @@ No new Python dependencies — `httpx` and `pydantic` are already installed.
 │                            ▼                                         │
 │                  ┌───────────────────────────────────┐               │
 │                  │  build_window(segments, now,      │               │
-│                  │     window_s=60)                  │               │
+│                  │     window_s=30)                  │               │
 │                  └─────────┬─────────────────────────┘               │
 │                            │                                         │
 │                            ▼                                         │
@@ -102,12 +102,12 @@ No new Python dependencies — `httpx` and `pydantic` are already installed.
 ### Why a single async worker (not per-segment, not threaded)
 
 - Ollama calls are async-friendly (httpx) and the LLM is single-threaded by nature — one in-flight call at a time avoids thrashing the model.
-- Firing on a fixed 10s tick (vs per-segment) prevents redundant calls when whisper emits a burst of segments.
+- Firing on a fixed 5s tick (vs per-segment) prevents redundant calls when whisper emits a burst of segments.
 - `asyncio.Task` lives in the FastAPI event loop with everything else — no IPC, no extra process to manage.
 
 ### Skip-if-busy semantics
 
-If the previous tick is still running when the next 10s timer fires, **skip this tick**. Don't queue. The LLM can take 3–10s; on slow models / long windows, we'd queue forever. Skipping is acceptable because the *next* tick still sees a complete 60s window.
+If the previous tick is still running when the next 5s timer fires, **skip this tick**. Don't queue. The LLM can take 1.5–7s depending on model; on slow models / long windows, we'd queue forever. Skipping is acceptable because the *next* tick still sees a complete 30s window.
 
 ---
 
@@ -195,7 +195,7 @@ TRANSCRIPT WINDOW (most recent first):
 ```python
 class ExtractorWorker:
     def __init__(self, app: FastAPI, model: str, client: OllamaClient,
-                 tick_s: float = 10.0, window_s: float = 60.0): ...
+                 tick_s: float = 5.0, window_s: float = 30.0): ...
     def start(self) -> None  # creates asyncio.Task, schedules
     async def stop(self) -> None  # cancels + awaits
 ```
@@ -295,19 +295,19 @@ The frontend hook handles these. `insight_update` is for status/text changes; th
 
 ```
 t=0s: backend lifespan starts ExtractorWorker
-t=10s: tick fires
+t=5s: tick fires
         recording_state == "recording" ✓
-        window = segments where end_s >= last_seg_end - 60
+        window = segments where end_s >= last_seg_end - 30
         prompt built
-        ollama POST /api/chat (3–6s)
+        ollama POST /api/chat (1.5–4s with phi3)
         response = {"requirements": [{"text": "...", ...}, ...]}
         dedup vs session.insights (exact-text)
         for each new: Insight created, appended, WS broadcast
-t=20s: tick fires; previous done; new window includes more recent segments
+t=10s: tick fires; previous done; new window includes more recent segments
         ...
 ```
 
-Latency from utterance to card: `whisper chunk (2s) + whisper transcribe (1s) + tick wait (up to 10s) + LLM (3-6s) ≈ 6-19s worst case`. Typical: 8-12s.
+Latency from utterance to card: `whisper chunk (2s) + whisper transcribe (1s) + tick wait (up to 5s) + LLM (1.5-4s with phi3) ≈ 4.5-12s worst case`. Typical: 6-9s. With mistral, add ~2s to both.
 
 ---
 
@@ -346,7 +346,7 @@ ui/
 - `test_ollama_client.py`: respx mocks Ollama `/api/chat`. Test success, JSON return, timeout, connection error.
 - `test_extractor.py`: stub `OllamaClient` to return canned JSON. Test:
   - Empty session → no calls to `chat`
-  - Window builder picks segments within 60s
+  - Window builder picks segments within 30s
   - Dedup drops exact-text duplicates
   - Malformed JSON output → worker doesn't crash, no insights added
   - Skip-if-busy: simulate slow chat() and verify next tick is skipped
