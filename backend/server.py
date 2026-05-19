@@ -13,9 +13,13 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from backend.delivery import deliver
+from backend.extractor import ExtractorWorker
+from backend.insights import Insight
+from backend.ollama_client import OllamaClient
 from backend.state import Segment, SessionState
 
 DEFAULT_ENDPOINT = "https://staging.doings.de/stt"
+DEFAULT_MODEL = "phi3"
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CAPTURE_PYTHON = REPO_ROOT / "capture" / ".venv" / "bin" / "python"
@@ -65,7 +69,21 @@ async def lifespan(app: FastAPI):
     app.state.capture_proc = None
     # In-memory list of finished sessions (PRD forbids persistence).
     app.state.past_sessions = []
+
+    model = os.getenv("OLLAMA_MODEL", DEFAULT_MODEL)
+    app.state.ollama_model = model
+    app.state.ollama_client = OllamaClient(base_url=os.getenv("OLLAMA_URL", "http://localhost:11434"))
+    app.state.extractor = ExtractorWorker(
+        state=app.state.session,
+        hub=app.state.hub,
+        client=app.state.ollama_client,
+        model=model,
+    )
+    app.state.extractor.start()
+
     yield
+
+    await app.state.extractor.stop()
     proc = app.state.capture_proc
     if proc is not None and proc.returncode is None:
         proc.send_signal(signal.SIGINT)
@@ -87,6 +105,32 @@ def _segment_to_dict(seg: Segment) -> dict:
         "end_s": seg.end_s,
         "lang": seg.lang,
     }
+
+
+def _insight_to_dict(ins: Insight) -> dict:
+    return {
+        "id": ins.id,
+        "session_id": ins.session_id,
+        "category": ins.category,
+        "text": ins.text,
+        "original_text": ins.original_text,
+        "source_quote": ins.source_quote,
+        "language": ins.language,
+        "confidence": ins.confidence,
+        "status": ins.status,
+        "created_at_iso": ins.created_at_iso,
+    }
+
+
+def _find_insight(app: FastAPI, ins_id: str) -> tuple[int, Insight] | None:
+    for i, ins in enumerate(app.state.session.insights):
+        if ins.id == ins_id:
+            return i, ins
+    return None
+
+
+def _replace_insight(app: FastAPI, idx: int, new: Insight) -> None:
+    app.state.session.insights[idx] = new
 
 
 async def _deliver_and_report(seg: Segment) -> None:
@@ -335,6 +379,78 @@ async def post_segment(payload: SegmentIn) -> dict:
     return {"accepted": True}
 
 
+class EditBody(BaseModel):
+    text: str
+
+
+@app.get("/insights")
+async def list_insights() -> dict:
+    return {"insights": [_insight_to_dict(i) for i in app.state.session.insights]}
+
+
+@app.post("/insights/{ins_id}/approve")
+async def approve_insight(ins_id: str) -> dict:
+    found = _find_insight(app, ins_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="insight not found")
+    idx, ins = found
+    from dataclasses import replace
+    new = replace(ins, status="approved")
+    _replace_insight(app, idx, new)
+    await app.state.hub.broadcast({
+        "type": "insight_update",
+        "id": new.id,
+        "status": new.status,
+        "text": new.text,
+    })
+    return {"insight": _insight_to_dict(new)}
+
+
+@app.post("/insights/{ins_id}/decline")
+async def decline_insight(ins_id: str) -> dict:
+    found = _find_insight(app, ins_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="insight not found")
+    idx, ins = found
+    from dataclasses import replace
+    new = replace(ins, status="declined")
+    _replace_insight(app, idx, new)
+    await app.state.hub.broadcast({
+        "type": "insight_update",
+        "id": new.id,
+        "status": new.status,
+        "text": new.text,
+    })
+    return {"insight": _insight_to_dict(new)}
+
+
+@app.post("/insights/{ins_id}/edit")
+async def edit_insight(ins_id: str, body: EditBody) -> dict:
+    found = _find_insight(app, ins_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="insight not found")
+    idx, ins = found
+    new_text = body.text.strip()
+    if not new_text or len(new_text) > 500:
+        raise HTTPException(status_code=400, detail="text must be 1..500 chars")
+    from dataclasses import replace
+    new = replace(ins, text=new_text, status="pending")
+    _replace_insight(app, idx, new)
+    await app.state.hub.broadcast({
+        "type": "insight_update",
+        "id": new.id,
+        "status": new.status,
+        "text": new.text,
+    })
+    return {"insight": _insight_to_dict(new)}
+
+
+@app.get("/ai/status")
+async def ai_status() -> dict:
+    result = await app.state.ollama_client.health(model=app.state.ollama_model)
+    return {"state": result, "model": app.state.ollama_model}
+
+
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
     hub: Hub = app.state.hub
@@ -345,6 +461,9 @@ async def ws_endpoint(ws: WebSocket) -> None:
         "state": s.recording_state,
         "session_id": s.session_id,
     })
+    # Also send a snapshot of any existing insights, so a late client catches up.
+    for ins in s.insights:
+        await ws.send_json({"type": "insight", "insight": _insight_to_dict(ins)})
     try:
         while True:
             await ws.receive_text()
