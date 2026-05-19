@@ -42,6 +42,30 @@ The whisper model (`ggml-medium`, ~769MB) downloads automatically on first captu
 
 ---
 
+## Quick start (TL;DR)
+
+Four terminals, all from the repo root unless noted.
+
+```bash
+# Terminal 0 — Ollama (AI insights)
+ollama pull phi3            # one-time, ~2.4GB
+ollama serve
+
+# Terminal 1 — echo (stand-in for staging.doings.de)
+PYTHONPATH=. backend/.venv/bin/uvicorn backend.echo_endpoint:app --port 8001
+
+# Terminal 2 — backend
+OLLAMA_MODEL=phi3 DOINGS_ENDPOINT=http://localhost:8001/stt \
+  PYTHONPATH=. backend/.venv/bin/uvicorn backend.server:app --reload --port 8000
+
+# Terminal 3 — UI
+cd ui && npm run dev
+```
+
+Open **http://localhost:5173**, click ▶ Start, allow mic permission, speak. Skip Terminal 0 if you don't care about AI insights — everything else still works.
+
+---
+
 ## Running the dashboard
 
 The full stack is **three required processes + Ollama for AI insights**, each in its own terminal. Keep them all running for the demo.
