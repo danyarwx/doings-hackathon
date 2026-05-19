@@ -39,7 +39,14 @@ export function useSessionWs(): SessionView {
         }
         if (msg.type === "state") {
           setState(msg.state);
-          setSessionId(msg.session_id);
+          setSessionId((prevId) => {
+            // New session id from backend → clear stale segments from the
+            // previous run. Same id (e.g. resume after pause) keeps them.
+            if (msg.session_id && msg.session_id !== prevId) {
+              setSegments([]);
+            }
+            return msg.session_id;
+          });
         } else if (msg.type === "segment") {
           setSegments((prev) => [...prev, msg.segment]);
         }
