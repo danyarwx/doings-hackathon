@@ -18,6 +18,7 @@ from capture.capture import list_input_devices, start_capture
 from capture.formatter import format_segment
 from capture.segment import Segment
 from capture.transcribe import Transcriber
+from capture.utils import check_hardware_warnings
 
 
 def parse_args() -> argparse.Namespace:
@@ -95,6 +96,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    check_hardware_warnings()
+    
     args = parse_args()
 
     session_id = "sess-" + datetime.now().strftime("%Y%m%d-%H%M%S")
