@@ -3,17 +3,178 @@
 from __future__ import annotations
 
 import asyncio
+import json as _json
+import logging
 import os
 import shlex
 import subprocess
+import threading
+import uuid
+from collections import defaultdict
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from backend.delivery import deliver
 from backend.state import Segment, SessionState
+
+log = logging.getLogger("backend.server")
+
+# ---------------------------------------------------------------------------
+# Extraction — lazy background model load
+# ---------------------------------------------------------------------------
+
+EXTRACT_TRIGGER: int = int(os.getenv("EXTRACT_TRIGGER", "4"))
+
+_ext_pipe: Any = None
+_ext_pipe_lock = threading.Lock()
+_ext_ready = False
+
+
+def _load_model_bg() -> None:
+    global _ext_pipe, _ext_ready
+    try:
+        from model import MODEL_ID, load_model  # type: ignore[import]
+        log.info("Loading extraction model %s …", MODEL_ID)
+        pipe = load_model(MODEL_ID)
+        with _ext_pipe_lock:
+            _ext_pipe = pipe
+            _ext_ready = True
+        log.info("Extraction model ready.")
+    except Exception as exc:
+        log.warning("Extraction model failed to load (insights disabled): %s", exc)
+
+
+class _ExtractionBuffer:
+    def __init__(self) -> None:
+        self._pending: dict[str, list] = defaultdict(list)
+        self._lock = threading.Lock()
+
+    def add(self, session_id: str, seg: dict) -> list | None:
+        with self._lock:
+            self._pending[session_id].append(seg)
+            if len(self._pending[session_id]) >= EXTRACT_TRIGGER:
+                batch = list(self._pending[session_id])
+                self._pending[session_id].clear()
+                return batch
+        return None
+
+    def flush(self, session_id: str) -> list:
+        with self._lock:
+            return list(self._pending.pop(session_id, []))
+
+
+_ext_buffer = _ExtractionBuffer()
+
+
+def _extract_sync(text: str) -> dict:
+    from model import MODEL_ID, build_prompt, clean_json  # type: ignore[import]
+    with _ext_pipe_lock:
+        if _ext_pipe is None:
+            return {}
+        outputs = _ext_pipe(
+            build_prompt(text, MODEL_ID),
+            max_new_tokens=800,
+            do_sample=False,
+            temperature=None,
+            top_p=None,
+        )
+    raw = outputs[0]
+    if isinstance(raw, dict):
+        generated = raw.get("generated_text", "")
+        if isinstance(generated, list):
+            generated = generated[-1].get("content", "")
+    else:
+        generated = str(raw)
+    cleaned = clean_json(generated)
+    try:
+        return _json.loads(cleaned)
+    except Exception:
+        return {}
+
+
+def _map_to_insights(data: dict, batch: list, session_id: str) -> list[dict]:
+    lang = (batch[-1].get("lang") or "en") if batch else "en"
+    source_quote = " ".join(s["text"] for s in batch)[:200]
+    results: list[dict] = []
+
+    for item in data.get("requirements", []):
+        text = item if isinstance(item, str) else item.get("summary", "")
+        if not text:
+            continue
+        results.append({
+            "id": f"ins-{uuid.uuid4().hex[:8]}",
+            "session_id": session_id,
+            "type": "requirement",
+            "text": text,
+            "source_quote": source_quote,
+            "language": lang,
+            "confidence": 0.80,
+            "needs_review": True,
+            "status": "pending",
+        })
+
+    for item in data.get("action_items", []):
+        if isinstance(item, str):
+            text = item
+        else:
+            parts = [item.get("task", "")]
+            if item.get("owner"):
+                parts.append(f"→ {item['owner']}")
+            if item.get("deadline"):
+                parts.append(f"(by {item['deadline']})")
+            text = " ".join(parts)
+        if not text:
+            continue
+        results.append({
+            "id": f"ins-{uuid.uuid4().hex[:8]}",
+            "session_id": session_id,
+            "type": "action_item",
+            "text": text,
+            "source_quote": source_quote,
+            "language": lang,
+            "confidence": 0.85,
+            "needs_review": True,
+            "status": "pending",
+        })
+
+    for item in data.get("decisions", []):
+        text = item if isinstance(item, str) else item.get("summary", "")
+        if not text:
+            continue
+        results.append({
+            "id": f"ins-{uuid.uuid4().hex[:8]}",
+            "session_id": session_id,
+            "type": "decision",
+            "text": text,
+            "source_quote": source_quote,
+            "language": lang,
+            "confidence": 0.90,
+            "needs_review": False,
+            "status": "pending",
+        })
+
+    return results
+
+
+async def _run_extraction(session_id: str, batch: list, hub: "Hub") -> None:
+    if not _ext_ready:
+        return
+    text = " ".join(s["text"] for s in batch)
+    loop = asyncio.get_event_loop()
+    try:
+        data = await loop.run_in_executor(None, _extract_sync, text)
+    except Exception as exc:
+        log.warning("Extraction failed: %s", exc)
+        return
+    if not data:
+        return
+    for ins in _map_to_insights(data, batch, session_id):
+        await hub.broadcast({"type": "insight", "insight": ins})
 
 DEFAULT_ENDPOINT = "https://staging.doings.de/stt"
 
@@ -62,6 +223,8 @@ async def lifespan(app: FastAPI):
     app.state.endpoint = os.getenv("DOINGS_ENDPOINT", DEFAULT_ENDPOINT)
     app.state.capture_proc = None
     app.state.past_sessions = []
+    # Start model load in background — server is ready immediately.
+    threading.Thread(target=_load_model_bg, daemon=True).start()
     yield
     proc = app.state.capture_proc
     if proc is not None and proc.poll() is None:
@@ -341,6 +504,9 @@ async def post_segment(payload: SegmentIn) -> dict:
     app.state.session.add_segment(seg)
     await app.state.hub.broadcast({"type": "segment", "segment": _segment_to_dict(seg)})
     asyncio.create_task(_deliver_and_report(seg))
+    batch = _ext_buffer.add(seg.session_id, _segment_to_dict(seg))
+    if batch is not None:
+        asyncio.create_task(_run_extraction(seg.session_id, batch, app.state.hub))
     return {"accepted": True}
 
 

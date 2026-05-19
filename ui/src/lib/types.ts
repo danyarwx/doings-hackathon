@@ -47,4 +47,5 @@ export type RecordingState =
 export type WsMessage =
   | { type: "state"; state: Exclude<RecordingState, "disconnected">; session_id: string | null }
   | { type: "segment"; segment: Segment }
-  | { type: "delivery"; id: string; status: string; attempts: number };
+  | { type: "delivery"; id: string; status: string; attempts: number }
+  | { type: "insight"; insight: Insight };

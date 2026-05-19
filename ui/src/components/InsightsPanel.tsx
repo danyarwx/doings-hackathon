@@ -6,13 +6,18 @@ import InsightCard from "./InsightCard";
 type Props = { insights?: Insight[] };
 
 export default function InsightsPanel({ insights = [] }: Props) {
-  // Local state lets the scaffold demo approve/reject before Step 3 wires
-  // up backend-pushed insights. Replace with backend-driven mutation later.
-  const [items, setItems] = useState<Insight[]>(insights);
+  // Local overrides for approve/reject — keyed by insight id.
+  // Incoming insights from props are shown immediately as they arrive.
+  const [statuses, setStatuses] = useState<Record<string, "approved" | "rejected">>({});
 
   const setStatus = (id: string, status: "approved" | "rejected") => {
-    setItems((prev) => prev.map((i) => (i.id === id ? { ...i, status } : i)));
+    setStatuses((prev) => ({ ...prev, [id]: status }));
   };
+
+  const items = insights.map((i) => ({
+    ...i,
+    status: statuses[i.id] ?? i.status,
+  }));
 
   const hasItems = items.length > 0;
   const pendingCount = items.filter((i) => i.status === "pending").length;
@@ -35,7 +40,7 @@ export default function InsightsPanel({ insights = [] }: Props) {
             <div className="text-center text-white/40 text-sm border border-dashed border-white/20 rounded-xl p-6 max-w-xs">
               <div className="text-white/60 mb-2">No insights yet</div>
               <div className="text-xs">
-                The local LLM will extract requirements, decisions, and action items here as you speak (Step 3).
+                Extraction triggers every 4 segments. Start recording to see requirements, decisions, and action items appear here.
               </div>
             </div>
           </div>

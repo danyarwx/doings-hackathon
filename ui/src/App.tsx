@@ -53,7 +53,7 @@ export default function App() {
             />
           </div>
           <div className="min-h-0">
-            <InsightsPanel />
+            <InsightsPanel insights={session.insights} />
           </div>
         </div>
         <ControlBar state={session.state} />

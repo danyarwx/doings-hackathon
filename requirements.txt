@@ -1,10 +1,19 @@
-pywhispercpp==1.0.0
-numpy==1.26.4
+# STT / audio capture
+pywhispercpp==1.4.1
+sounddevice==0.5.5
+numpy==2.4.6
 
-fastapi==0.110.0
-uvicorn==0.27.1
+# Backend
+fastapi==0.136.1
+uvicorn==0.47.0
+httpx==0.28.1
+pydantic==2.13.4
+websockets==16.0
 
-sounddevice==0.4.6
-scipy==1.11.4
+# LLM extraction (Step 3)
+transformers==5.8.1
+torch==2.12.0
+accelerate==1.13.0
 
-pytest==8.2.0
+# Dev / testing
+pytest==9.0.3

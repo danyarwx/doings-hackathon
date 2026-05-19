@@ -5,19 +5,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-InsightStatus = Literal["pending", "approved", "declined"]
-InsightCategory = Literal["functional", "non_functional"]
+InsightType = Literal["requirement", "action_item", "decision"]
+InsightStatus = Literal["pending", "approved", "rejected"]
 
 
 @dataclass(frozen=True)
 class Insight:
     id: str
     session_id: str
-    category: InsightCategory
+    type: InsightType
     text: str
-    original_text: str
     source_quote: str
     language: str
     confidence: float
+    needs_review: bool
     status: InsightStatus
     created_at_iso: str
