@@ -17,7 +17,7 @@ export async function stopSession(): Promise<void> {
   if (!r.ok) throw new Error(`stop failed: ${r.status}`);
 }
 
-import type { PastSession, PastSessionSummary } from "./types";
+import type { Insight, PastSession, PastSessionSummary } from "./types";
 
 export async function listHistory(): Promise<PastSessionSummary[]> {
   const r = await fetch("/api/history");
@@ -30,4 +30,26 @@ export async function getHistorySession(id: string): Promise<PastSession> {
   const r = await fetch(`/api/history/${encodeURIComponent(id)}`);
   if (!r.ok) throw new Error(`history fetch failed: ${r.status}`);
   return r.json();
+}
+
+export async function approveInsight(id: string): Promise<Insight> {
+  const r = await fetch(`/api/insights/${encodeURIComponent(id)}/approve`, { method: "POST" });
+  if (!r.ok) throw new Error(`approve failed: ${r.status}`);
+  return (await r.json()).insight;
+}
+
+export async function declineInsight(id: string): Promise<Insight> {
+  const r = await fetch(`/api/insights/${encodeURIComponent(id)}/decline`, { method: "POST" });
+  if (!r.ok) throw new Error(`decline failed: ${r.status}`);
+  return (await r.json()).insight;
+}
+
+export async function editInsight(id: string, text: string): Promise<Insight> {
+  const r = await fetch(`/api/insights/${encodeURIComponent(id)}/edit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (!r.ok) throw new Error(`edit failed: ${r.status}`);
+  return (await r.json()).insight;
 }
