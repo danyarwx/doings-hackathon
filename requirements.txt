@@ -1,0 +1,10 @@
+pywhispercpp==1.0.0
+numpy==1.26.4
+
+fastapi==0.110.0
+uvicorn==0.27.1
+
+sounddevice==0.4.6
+scipy==1.11.4
+
+pytest==8.2.0
