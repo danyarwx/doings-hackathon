@@ -10,6 +10,6 @@
   }
   body {
     @apply font-sans text-white antialiased;
-    background: linear-gradient(135deg, theme(colors.bg.from) 0%, theme(colors.bg.to) 100%);
+    background: #000000;
   }
 }

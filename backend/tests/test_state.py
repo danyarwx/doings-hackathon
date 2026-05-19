@@ -43,3 +43,28 @@ def test_reset_clears_segments_and_deliveries():
     assert state.segments == []
     assert state.deliveries == {}
     assert state.session_id == "s2"
+
+
+def test_reset_clears_insights_too():
+    from backend.insights import Insight
+    state = SessionState()
+    ins = Insight(
+        id="ins-001",
+        session_id="s1",
+        category="functional",
+        text="x",
+        original_text="x",
+        source_quote="x",
+        language="en",
+        confidence=0.8,
+        status="pending",
+        created_at_iso="2026-05-19T00:00:00Z",
+    )
+    state.insights.append(ins)
+    state.reset(session_id="s2")
+    assert state.insights == []
+
+
+def test_initial_state_has_empty_insights():
+    state = SessionState()
+    assert state.insights == []

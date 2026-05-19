@@ -5,8 +5,8 @@ export default {
     extend: {
       colors: {
         bg: {
-          from: "#0B1437",
-          to: "#111c44",
+          from: "#000000",
+          to: "#000000",
         },
         neon: {
           cyan: "#01B5E2",

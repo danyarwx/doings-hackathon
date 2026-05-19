@@ -63,6 +63,8 @@ async def lifespan(app: FastAPI):
     app.state.hub = Hub()
     app.state.endpoint = os.getenv("DOINGS_ENDPOINT", DEFAULT_ENDPOINT)
     app.state.capture_proc = None
+    # In-memory list of finished sessions (PRD forbids persistence).
+    app.state.past_sessions = []
     yield
     proc = app.state.capture_proc
     if proc is not None and proc.returncode is None:
@@ -111,15 +113,46 @@ async def _deliver_and_report(seg: Segment) -> None:
     })
 
 
-def _capture_command() -> list[str]:
+def _capture_command(language: str | None = None) -> list[str]:
     cmd_str = os.getenv("CAPTURE_CMD", DEFAULT_CAPTURE_CMD)
-    return shlex.split(cmd_str)
+    parts = shlex.split(cmd_str)
+    if language and "--language" not in parts:
+        parts += ["--language", language]
+    return parts
 
 
-def _capture_env() -> dict:
+def _capture_env(session_id: str) -> dict:
     env = dict(os.environ)
     env["PYTHONPATH"] = str(REPO_ROOT)
+    env["CAPTURE_SESSION_ID"] = session_id
     return env
+
+
+def _new_session_id() -> str:
+    from datetime import datetime
+    return "sess-" + datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+def _archive_current_session(app: FastAPI) -> None:
+    s: SessionState = app.state.session
+    if s.session_id is None or not s.segments:
+        return
+    languages = sorted({seg.lang for seg in s.segments})
+    duration_s = (s.segments[-1].end_s - s.segments[0].start_s) if s.segments else 0.0
+    snapshot = {
+        "session_id": s.session_id,
+        "ended_at_iso": _utc_iso_now(),
+        "segment_count": len(s.segments),
+        "duration_s": round(duration_s, 1),
+        "languages": languages,
+        "segments": [_segment_to_dict(seg) for seg in s.segments],
+    }
+    app.state.past_sessions.insert(0, snapshot)  # newest first
+
+
+def _utc_iso_now() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 async def _monitor_capture(app: FastAPI) -> None:
@@ -127,27 +160,49 @@ async def _monitor_capture(app: FastAPI) -> None:
     if proc is None:
         return
     await proc.wait()
-    # Capture exited (cleanly or otherwise) → return to idle.
-    app.state.capture_proc = None
-    app.state.session.recording_state = "idle"
-    await app.state.hub.broadcast({
-        "type": "state",
-        "state": "idle",
-        "session_id": app.state.session.session_id,
-    })
+    # If the subprocess died while we were already transitioning (pause/stop),
+    # those routes set the authoritative state — don't overwrite it here.
+    if app.state.session.recording_state == "recording":
+        app.state.capture_proc = None
+        app.state.session.recording_state = "idle"
+        await app.state.hub.broadcast({
+            "type": "state",
+            "state": "idle",
+            "session_id": app.state.session.session_id,
+        })
+
+
+class StartBody(BaseModel):
+    language: str | None = None
 
 
 @app.post("/control/start")
-async def control_start() -> dict:
-    if app.state.capture_proc is not None and app.state.capture_proc.returncode is None:
+async def control_start(body: StartBody | None = None) -> dict:
+    if (
+        app.state.session.recording_state == "recording"
+        or (app.state.capture_proc is not None and app.state.capture_proc.returncode is None)
+    ):
         raise HTTPException(status_code=409, detail="already recording")
-    cmd = _capture_command()
+
+    language = body.language if body else None
+    resuming_from_paused = app.state.session.recording_state == "paused"
+    if not resuming_from_paused:
+        # Archive the just-finished session before wiping it.
+        _archive_current_session(app)
+        # Fresh session: clear segments + delivery state, mint a new id.
+        app.state.session.reset(session_id=_new_session_id())
+
+    session_id = app.state.session.session_id or _new_session_id()
+    if app.state.session.session_id is None:
+        app.state.session.session_id = session_id
+
+    cmd = _capture_command(language=language)
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
         cwd=str(REPO_ROOT),
-        env=_capture_env(),
+        env=_capture_env(session_id),
     )
     app.state.capture_proc = proc
     app.state.session.recording_state = "recording"
@@ -155,15 +210,38 @@ async def control_start() -> dict:
     await app.state.hub.broadcast({
         "type": "state",
         "state": "recording",
+        "session_id": session_id,
+    })
+    return {"pid": proc.pid, "session_id": session_id}
+
+
+@app.post("/control/pause")
+async def control_pause() -> dict:
+    proc = app.state.capture_proc
+    if proc is None or proc.returncode is not None or app.state.session.recording_state != "recording":
+        raise HTTPException(status_code=409, detail="not recording")
+    app.state.session.recording_state = "paused"
+    proc.send_signal(signal.SIGINT)
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=3.0)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+    app.state.capture_proc = None
+    await app.state.hub.broadcast({
+        "type": "state",
+        "state": "paused",
         "session_id": app.state.session.session_id,
     })
-    return {"pid": proc.pid}
+    return {"paused": True}
 
 
 @app.post("/control/stop")
 async def control_stop() -> dict:
+    state = app.state.session.recording_state
     proc = app.state.capture_proc
-    if proc is None or proc.returncode is not None:
+    # Stop is valid from both recording and paused.
+    if state == "idle":
         raise HTTPException(status_code=409, detail="not recording")
     app.state.session.recording_state = "stopping"
     await app.state.hub.broadcast({
@@ -171,12 +249,13 @@ async def control_stop() -> dict:
         "state": "stopping",
         "session_id": app.state.session.session_id,
     })
-    proc.send_signal(signal.SIGINT)
-    try:
-        await asyncio.wait_for(proc.wait(), timeout=3.0)
-    except asyncio.TimeoutError:
-        proc.kill()
-        await proc.wait()
+    if proc is not None and proc.returncode is None:
+        proc.send_signal(signal.SIGINT)
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=3.0)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
     app.state.capture_proc = None
     app.state.session.recording_state = "idle"
     await app.state.hub.broadcast({
@@ -210,6 +289,34 @@ async def export_session() -> dict:
         "session_id": s.session_id,
         "segments": [_segment_to_dict(seg) for seg in s.segments],
     }
+
+
+@app.get("/history")
+async def list_history() -> dict:
+    return {
+        "sessions": [
+            {
+                "session_id": h["session_id"],
+                "ended_at_iso": h["ended_at_iso"],
+                "segment_count": h["segment_count"],
+                "duration_s": h["duration_s"],
+                "languages": h["languages"],
+            }
+            for h in app.state.past_sessions
+        ],
+    }
+
+
+@app.get("/history/{session_id}")
+async def get_history_session(session_id: str) -> dict:
+    for h in app.state.past_sessions:
+        if h["session_id"] == session_id:
+            return {
+                "session_id": h["session_id"],
+                "ended_at_iso": h["ended_at_iso"],
+                "segments": h["segments"],
+            }
+    raise HTTPException(status_code=404, detail="session not found")
 
 
 @app.post("/segments", status_code=202)

@@ -7,22 +7,44 @@ export type Segment = {
   lang: string;
 };
 
-export type DeliveryStatusValue = "pending" | "delivered" | "failed";
-
-export type DeliveryStatus = {
-  id: string;
-  status: DeliveryStatusValue;
-  attempts: number;
+export type PastSessionSummary = {
+  session_id: string;
+  ended_at_iso: string;
+  segment_count: number;
+  duration_s: number;
+  languages: string[];
 };
 
-export type RecordingState = "idle" | "recording" | "stopping" | "disconnected";
+export type PastSession = {
+  session_id: string;
+  ended_at_iso: string;
+  segments: Segment[];
+};
+
+export type InsightType = "requirement" | "action_item" | "decision" | "chatter";
+
+export type InsightStatus = "pending" | "approved" | "rejected";
+
+export type Insight = {
+  id: string;
+  segment_id: string;
+  type: InsightType;
+  text: string;
+  source_quote: string;
+  language: string;
+  confidence: number;
+  needs_review: boolean;
+  status: InsightStatus;
+};
+
+export type RecordingState =
+  | "idle"
+  | "recording"
+  | "paused"
+  | "stopping"
+  | "disconnected";
 
 export type WsMessage =
   | { type: "state"; state: Exclude<RecordingState, "disconnected">; session_id: string | null }
   | { type: "segment"; segment: Segment }
-  | { type: "delivery"; id: string; status: DeliveryStatusValue; attempts: number };
-
-export type SessionExport = {
-  session_id: string | null;
-  segments: Segment[];
-};
+  | { type: "delivery"; id: string; status: string; attempts: number };
