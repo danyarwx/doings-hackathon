@@ -16,6 +16,7 @@ from backend.delivery import deliver
 from backend.extractor import ExtractorWorker
 from backend.insights import Insight
 from backend.ollama_client import OllamaClient
+from backend.sentence_buffer import SentenceBuffer
 from backend.state import Segment, SessionState
 
 DEFAULT_ENDPOINT = "https://staging.doings.de/stt"
@@ -73,11 +74,13 @@ async def lifespan(app: FastAPI):
     model = os.getenv("OLLAMA_MODEL", DEFAULT_MODEL)
     app.state.ollama_model = model
     app.state.ollama_client = OllamaClient(base_url=os.getenv("OLLAMA_URL", "http://localhost:11434"))
+    app.state.sentence_buffer = SentenceBuffer()
     app.state.extractor = ExtractorWorker(
         state=app.state.session,
         hub=app.state.hub,
         client=app.state.ollama_client,
         model=model,
+        buffer=app.state.sentence_buffer,
     )
     app.state.extractor.start()
 
@@ -235,6 +238,7 @@ async def control_start(body: StartBody | None = None) -> dict:
         _archive_current_session(app)
         # Fresh session: clear segments + delivery state, mint a new id.
         app.state.session.reset(session_id=_new_session_id())
+        app.state.sentence_buffer.reset()
 
     session_id = app.state.session.session_id or _new_session_id()
     if app.state.session.session_id is None:
@@ -374,6 +378,7 @@ async def post_segment(payload: SegmentIn) -> dict:
         lang=payload.lang,
     )
     app.state.session.add_segment(seg)
+    await app.state.sentence_buffer.add(seg)
     await app.state.hub.broadcast({"type": "segment", "segment": _segment_to_dict(seg)})
     asyncio.create_task(_deliver_and_report(seg))
     return {"accepted": True}
