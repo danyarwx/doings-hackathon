@@ -79,10 +79,12 @@ ollama serve
 In another shell (one-time per model):
 
 ```bash
-ollama pull phi3        # default — fast (~2.4GB)
-# Optional alternatives for A/B testing:
-ollama pull mistral     # stronger German (~4GB)
-ollama pull llama3.1    # strongest reasoning (~5GB)
+ollama pull phi3              # default — fast (~2.4GB)
+# Optional alternatives for A/B testing (all live-swappable from the nav):
+ollama pull phi4-mini:3.8b    # newer phi, slightly stronger (~2.5GB)
+ollama pull mistral           # stronger German (~4GB)
+ollama pull llama3.1          # strong reasoning (~5GB)
+ollama pull qwen3:8b          # newest qwen, multilingual incl. German (~5.2GB)
 ```
 
 Skip this terminal if you don't want AI insights — the rest of the dashboard still works (panel will show "AI offline").
@@ -113,7 +115,7 @@ If you want to point at the real `staging.doings.de/stt` instead, omit `DOINGS_E
 
 | Var | Default | Purpose |
 |---|---|---|
-| `OLLAMA_MODEL` | `phi3` | Local LLM for AI insights. Try `mistral`, `llama3.1`, `qwen2.5`. |
+| `OLLAMA_MODEL` | `phi3` | Initial LLM for AI insights. Live-swappable from the nav: `phi3`, `phi4-mini:3.8b`, `mistral`, `llama3.1`, `qwen3:8b`. |
 | `OLLAMA_URL` | `http://localhost:11434` | Override if Ollama runs elsewhere. |
 | `BUFFER_MAX_SILENCE_S` | `1.5` | Silence gap (s) that flushes the sentence buffer. |
 | `BUFFER_MAX_DURATION_S` | `20.0` | Hard buffer-flush duration (s). |
@@ -136,7 +138,7 @@ Open **http://localhost:5173** in a browser.
 
 1. **Wait for the WebSocket to connect** — the header dot turns gray ("Idle") instead of pink ("Backend offline").
 2. **(Optional) Set your meeting vocabulary** — click **Vocabulary** in the top nav, type domain jargon, acronyms, product/people names (comma-separated is fine), and **Save**. Whisper picks this up as a `--prompt` hint on the next ▶ Start. Helps spelling for things like *Salesforce, Telekom, OAuth, Q4 OKRs*.
-3. **(Optional) Pick a model** — the chip showing `phi3` in the top nav opens a model dropdown (`phi3` / `mistral` / `llama3.1`). Swap any time; the backend updates the active model without restart.
+3. **(Optional) Pick a model** — the chip showing `phi3` in the top nav opens a model dropdown (`phi3` / `phi4-mini` / `mistral` / `llama3.1` / `qwen3 8B`). Swap any time; the backend updates the active model without restart. The model must be `ollama pull`-ed first.
 4. **Click ▶ Start** — backend spawns `capture/` as a subprocess. The dot turns red, the timer starts.
    - On the first run, macOS will prompt for microphone permission. Allow it.
    - On the first run, whisper downloads its model — this can take a minute. Watch terminal 2 for `[transcribe] loading model 'medium'...` followed by `model loaded.`.
@@ -173,7 +175,7 @@ All capture flags (`--model`, `--language`, `--prompt`, `--silence-gate-dbfs`, �
 | AI insights panel says "AI offline" | `ollama serve` isn't running. Start it; the panel reconnects within ~5s of the next tick. |
 | AI insights panel says "Model not installed" | Run `ollama pull phi3` (or whatever `OLLAMA_MODEL` is set to). |
 | Insights are too few / too many | Tune `EXTRACTOR_MIN_TEXT_LEN` (default `40`) or `EXTRACTOR_VERB_GATE` (default `true`). Lower min length or disable the verb gate → more pass through. Restart backend after env changes. |
-| Insights are wrong language or hallucinated | Switch model: `OLLAMA_MODEL=mistral` for German, `llama3.1` for stronger reasoning. Restart backend. |
+| Insights are wrong language or hallucinated | Switch model from the top-nav picker (no restart needed). `mistral` or `qwen3:8b` for German, `llama3.1` or `phi4-mini` for stronger reasoning. |
 
 ---
 
