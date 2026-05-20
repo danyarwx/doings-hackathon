@@ -1,48 +1,47 @@
-from backend.extractor_prompt import build_messages
-from backend.state import Segment
+from backend.extractor_prompt import SYSTEM_PROMPT, build_messages
+from backend.sentence_buffer import Utterance
 
 
-def _seg(text: str, start: float = 0.0, end: float = 1.0, lang: str = "en") -> Segment:
-    return Segment(id="seg-001", session_id="s1", text=text, start_s=start, end_s=end, lang=lang)
+def _u(text: str, start: float = 0.0, end: float = 2.0, lang: str = "en") -> Utterance:
+    return Utterance(text=text, start_s=start, end_s=end, lang=lang, segment_ids=["s1"])
 
 
-def test_messages_have_system_and_user():
-    msgs = build_messages(window=[_seg("hi")], existing_texts=[])
-    assert len(msgs) == 2
-    assert msgs[0]["role"] == "system"
-    assert msgs[1]["role"] == "user"
+def test_system_prompt_mentions_certainty_and_few_shot():
+    assert "certainty" in SYSTEM_PROMPT
+    assert "explicit" in SYSTEM_PROMPT
+    assert "implied" in SYSTEM_PROMPT
+    # Few-shot anchors
+    assert "product requirements" in SYSTEM_PROMPT
+    assert "must show monthly revenue" in SYSTEM_PROMPT
 
 
-def test_system_prompt_includes_schema_keys():
-    msgs = build_messages(window=[_seg("hi")], existing_texts=[])
-    sys_text = msgs[0]["content"]
-    for key in ("is_requirement", "reasoning", "text", "category", "source_quote", "language", "confidence"):
-        assert key in sys_text, f"missing {key} in system prompt"
+def test_system_prompt_does_not_mention_confidence():
+    assert "confidence" not in SYSTEM_PROMPT.lower()
 
 
-def test_user_includes_existing_and_window():
+def test_build_messages_includes_focus_and_context():
     msgs = build_messages(
-        window=[_seg("Das System muss schnell sein.", lang="de", end=12.4)],
-        existing_texts=["Auth uses OAuth"],
+        focus=_u("The dashboard must show revenue.", 10.0, 13.0),
+        context=[_u("We're building a CRM.", 0.0, 3.0)],
+        existing_texts=[],
     )
-    user_text = msgs[1]["content"]
-    assert "Auth uses OAuth" in user_text
-    assert "Das System muss schnell sein." in user_text
-    assert "[DE]" in user_text
+    user = msgs[1]["content"]
+    assert "FOCUS" in user
+    assert "CONTEXT" in user
+    assert "The dashboard must show revenue." in user
+    assert "We're building a CRM." in user
 
 
-def test_user_omits_existing_block_when_empty():
-    msgs = build_messages(window=[_seg("hi")], existing_texts=[])
-    user_text = msgs[1]["content"]
-    assert "EXISTING" not in user_text or "do not duplicate" in user_text.lower()
+def test_build_messages_truncates_existing_to_tail():
+    many = [f"req {i}" for i in range(20)]
+    msgs = build_messages(focus=_u("focus."), context=[], existing_texts=many)
+    user = msgs[1]["content"]
+    assert "req 19" in user
+    assert "req 9" not in user  # only last 10 included
 
 
-def test_existing_is_truncated_to_last_10():
-    msgs = build_messages(
-        window=[_seg("hi")],
-        existing_texts=[f"req {i}" for i in range(20)],
-    )
-    user_text = msgs[1]["content"]
-    assert "req 19" in user_text
-    assert "req 10" in user_text
-    assert "req 9" not in user_text
+def test_build_messages_omits_context_block_if_empty():
+    msgs = build_messages(focus=_u("focus."), context=[], existing_texts=[])
+    user = msgs[1]["content"]
+    assert "CONTEXT" not in user
+    assert "FOCUS" in user

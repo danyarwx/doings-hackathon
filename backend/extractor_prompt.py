@@ -1,46 +1,60 @@
-"""Prompt builder for the requirements-extractor LLM."""
+"""Prompt builder for the requirements-extractor LLM.
+
+The LLM sees one FOCUS utterance and up to 3 CONTEXT utterances. It extracts
+requirements ONLY from the FOCUS; CONTEXT is for resolving pronouns/references.
+"""
 
 from __future__ import annotations
 
-from backend.state import Segment
+from backend.sentence_buffer import Utterance
 
-SYSTEM_PROMPT = """You are a requirements extractor for engineering meetings. Output ONLY valid JSON that matches the schema below — no prose, no markdown.
+SYSTEM_PROMPT = """You are a requirements extractor for engineering meetings. Output ONLY valid JSON matching the schema — no prose, no markdown, no comments.
 
-A REQUIREMENT is a statement constraining what the system MUST, SHOULD, or HAS TO do. Hallmarks:
-- Modal verb of obligation (must, shall, should, has to / muss, sollte, soll)
-- Refers to system behavior, capability, performance, or a constraint
-- Stated as a fact about the product, not as an opinion or aside
+A REQUIREMENT is a COMPLETE CLAUSE (subject + verb) containing EITHER:
+- a MODAL verb of obligation: must, shall, should, will, needs to, has to, muss, soll, wird, braucht; OR
+- a clear INTENT verb: need, want, add, show, support, allow, integrate, brauchen, wollen, hinzufügen, zeigen, unterstützen.
 
-EXTRACT
-- Functional requirements (what the system does)
-- Non-functional requirements (performance, security, reliability, scalability, compliance, availability)
+The clause must describe what the system or product does, supports, or enforces.
 
-DO NOT EXTRACT
-- Items already in the EXISTING list (you will receive them — do not repeat)
-- Implementation decisions ("we'll use Postgres") unless they encode a real constraint
-- Questions, opinions, side comments, agreements ("yeah", "ok", "great")
-- Generic chatter, meta-talk about the meeting itself
-- Things the speaker is hypothesizing or exploring, not committing to
+DO NOT EXTRACT:
+- Fragments, noun phrases, or incomplete clauses
+- Questions ("how many?"), opinions, agreements ("yeah", "ok"), or chatter
+- Items already listed under EXISTING (do not duplicate)
+- Hypotheticals or aside speculation ("maybe we could…")
+- Implementation chatter unless it encodes a real constraint
+- Anything not present in the FOCUS utterance — CONTEXT is read-only
 
-Output the requirement text in the same language as the source quote (de stays de, en stays en).
+BAD examples (every one of these MUST be rejected by setting is_requirement=false):
+- "product requirements" — noun phrase, no verb
+- "document for the new" — fragment, incomplete clause
+- "how many?" — question, not a directive
+- "Yeah." — chatter
+- "It would be sales made." — ambiguous fragment, no clear requirement
 
-For each candidate, INCLUDE an `is_requirement` boolean and a short `reasoning` (one sentence) — answer those FIRST inside your head before filling in `text`. If `is_requirement` is false, still include the entry so the filter can see your reasoning; the backend will drop it.
+GOOD examples (these are real requirements):
+- "The dashboard must show monthly revenue." — modal verb + complete clause → explicit
+- "We need to support German language input." — intent verb + complete clause → explicit
+- "Sales reports should export to CSV." — modal verb + complete clause → explicit
 
-`source_quote` MUST be the exact words copied from the TRANSCRIPT WINDOW — no paraphrasing, no shortening. If you can't quote it exactly, set `is_requirement` to false.
+For each candidate, INCLUDE an `is_requirement` boolean and a one-sentence `reasoning`. If `is_requirement` is false, still include the entry so the filter can log it.
 
-`confidence` must reflect your real confidence (0.0–1.0). Use 0.5 if unsure. The backend will drop low-confidence items.
+`source_quote` MUST be the exact words copied from the FOCUS utterance — no paraphrasing.
+
+`certainty` is "explicit" if the FOCUS utterance contains the modal/intent verb verbatim, or "implied" if you inferred the requirement using CONTEXT (e.g., resolved a pronoun).
+
+Output the requirement `text` in the same language as the FOCUS (de stays de, en stays en).
 
 SCHEMA
 {
   "requirements": [
     {
       "is_requirement": true | false,
-      "reasoning": "<one sentence justifying the is_requirement decision>",
-      "text": "<the requirement in the source language>",
+      "reasoning": "<one sentence>",
+      "text": "<requirement in source language, complete clause, ≥40 chars>",
       "category": "functional" | "non_functional",
-      "source_quote": "<exact words from transcript>",
+      "source_quote": "<exact words from FOCUS>",
       "language": "de" | "en",
-      "confidence": 0.0..1.0
+      "certainty": "explicit" | "implied"
     }
   ]
 }
@@ -49,34 +63,44 @@ If nothing applies, return {"requirements": []}.
 """
 
 EXISTING_TAIL = 10
+CONTEXT_TAIL = 3
 
 
-def _format_segment(seg: Segment) -> str:
-    minutes = int(seg.start_s // 60)
-    secs = seg.start_s - minutes * 60
+def _format_utterance(u: Utterance) -> str:
+    minutes = int(u.start_s // 60)
+    secs = u.start_s - minutes * 60
     ts = f"{minutes:02d}:{secs:04.1f}"
-    return f"[{ts}][{seg.lang.upper()}] {seg.text.strip()}"
+    return f"[{ts}][{u.lang.upper()}] {u.text.strip()}"
 
 
 def build_messages(
     *,
-    window: list[Segment],
+    focus: Utterance,
+    context: list[Utterance],
     existing_texts: list[str],
 ) -> list[dict]:
     """Build the chat messages for the LLM extractor.
 
-    - `window`: ordered segments from oldest to newest within the rolling window.
-    - `existing_texts`: previously-extracted (non-declined) requirement texts; we
-      truncate to the last `EXISTING_TAIL` to keep the prompt bounded.
+    - `focus`: the new utterance the LLM should extract from.
+    - `context`: prior utterances (read-only context for resolving references).
+    - `existing_texts`: already-extracted texts; truncated to the last EXISTING_TAIL.
     """
-    existing_tail = existing_texts[-EXISTING_TAIL:]
     parts: list[str] = []
+
+    existing_tail = existing_texts[-EXISTING_TAIL:]
     if existing_tail:
         parts.append("EXISTING (do not duplicate):")
         parts.extend(f"- {t}" for t in existing_tail)
         parts.append("")
-    parts.append("TRANSCRIPT WINDOW (oldest first):")
-    parts.extend(_format_segment(s) for s in window)
+
+    context_tail = context[-CONTEXT_TAIL:]
+    if context_tail:
+        parts.append("CONTEXT (read-only, do not extract from this):")
+        parts.extend(_format_utterance(u) for u in context_tail)
+        parts.append("")
+
+    parts.append("FOCUS (extract only from this):")
+    parts.append(_format_utterance(focus))
 
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
