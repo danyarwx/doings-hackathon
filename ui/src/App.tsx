@@ -1,4 +1,5 @@
 import { useState } from "react";
+import AppNav from "./components/AppNav";
 import ControlBar from "./components/ControlBar";
 import InsightsPanel from "./components/InsightsPanel";
 import TranscriptPanel from "./components/TranscriptPanel";
@@ -42,21 +43,23 @@ export default function App() {
           noiseAmount={0.05}
         />
       </div>
-      <div className="h-screen p-6 flex flex-col gap-6 overflow-hidden relative">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 flex-1 min-h-0">
-          <div className="min-h-0">
-            <TranscriptPanel
-              segments={segmentsToShow}
-              viewingPastId={pastView?.sessionId ?? null}
-              onViewPast={handleViewPast}
-              onBackToLive={() => setPastView(null)}
-            />
+      <div className="h-screen flex flex-col overflow-hidden relative">
+        <AppNav onSelectPast={handleViewPast} />
+        <div className="flex-1 min-h-0 max-w-7xl w-full mx-auto px-8 py-6 flex flex-col gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 flex-1 min-h-0">
+            <div className="min-h-0">
+              <TranscriptPanel
+                segments={segmentsToShow}
+                viewingPastId={pastView?.sessionId ?? null}
+                onBackToLive={() => setPastView(null)}
+              />
+            </div>
+            <div className="min-h-0">
+              <InsightsPanel insights={session.insights} aiStatus={session.aiStatus} />
+            </div>
           </div>
-          <div className="min-h-0">
-            <InsightsPanel insights={session.insights} aiStatus={session.aiStatus} />
-          </div>
+          <ControlBar state={session.state} />
         </div>
-        <ControlBar state={session.state} />
       </div>
     </>
   );

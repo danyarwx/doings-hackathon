@@ -53,3 +53,35 @@ export async function editInsight(id: string, text: string): Promise<Insight> {
   if (!r.ok) throw new Error(`edit failed: ${r.status}`);
   return (await r.json()).insight;
 }
+
+export async function getVocabulary(): Promise<string> {
+  const r = await fetch("/api/vocabulary");
+  if (!r.ok) throw new Error(`vocabulary fetch failed: ${r.status}`);
+  return (await r.json()).text;
+}
+
+export async function setVocabulary(text: string): Promise<string> {
+  const r = await fetch("/api/vocabulary", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (!r.ok) throw new Error(`vocabulary save failed: ${r.status}`);
+  return (await r.json()).text;
+}
+
+export async function getModel(): Promise<{ model: string; allowed: string[] }> {
+  const r = await fetch("/api/model");
+  if (!r.ok) throw new Error(`model fetch failed: ${r.status}`);
+  return r.json();
+}
+
+export async function setModel(model: string): Promise<string> {
+  const r = await fetch("/api/model", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model }),
+  });
+  if (!r.ok) throw new Error(`model swap failed: ${r.status}`);
+  return (await r.json()).model;
+}

@@ -70,6 +70,8 @@ async def lifespan(app: FastAPI):
     app.state.capture_proc = None
     # In-memory list of finished sessions (PRD forbids persistence).
     app.state.past_sessions = []
+    # Whisper prompt hint set from the UI; applied on next /control/start.
+    app.state.vocabulary = ""
 
     model = os.getenv("OLLAMA_MODEL", DEFAULT_MODEL)
     app.state.ollama_model = model
@@ -160,11 +162,13 @@ async def _deliver_and_report(seg: Segment) -> None:
     })
 
 
-def _capture_command(language: str | None = None) -> list[str]:
+def _capture_command(language: str | None = None, vocabulary: str | None = None) -> list[str]:
     cmd_str = os.getenv("CAPTURE_CMD", DEFAULT_CAPTURE_CMD)
     parts = shlex.split(cmd_str)
     if language and "--language" not in parts:
         parts += ["--language", language]
+    if vocabulary and vocabulary.strip() and "--prompt" not in parts:
+        parts += ["--prompt", vocabulary.strip()]
     return parts
 
 
@@ -244,7 +248,7 @@ async def control_start(body: StartBody | None = None) -> dict:
     if app.state.session.session_id is None:
         app.state.session.session_id = session_id
 
-    cmd = _capture_command(language=language)
+    cmd = _capture_command(language=language, vocabulary=app.state.vocabulary)
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.DEVNULL,
@@ -454,6 +458,45 @@ async def edit_insight(ins_id: str, body: EditBody) -> dict:
 async def ai_status() -> dict:
     result = await app.state.ollama_client.health(model=app.state.ollama_model)
     return {"state": result, "model": app.state.ollama_model}
+
+
+class VocabularyBody(BaseModel):
+    text: str
+
+
+@app.get("/vocabulary")
+async def get_vocabulary() -> dict:
+    return {"text": app.state.vocabulary}
+
+
+@app.post("/vocabulary")
+async def set_vocabulary(body: VocabularyBody) -> dict:
+    text = body.text.strip()
+    if len(text) > 2000:
+        raise HTTPException(status_code=400, detail="vocabulary must be <= 2000 chars")
+    app.state.vocabulary = text
+    return {"text": text}
+
+
+ALLOWED_MODELS = ("phi3", "mistral", "llama3.1", "qwen2.5")
+
+
+class ModelBody(BaseModel):
+    model: str
+
+
+@app.get("/model")
+async def get_model() -> dict:
+    return {"model": app.state.ollama_model, "allowed": list(ALLOWED_MODELS)}
+
+
+@app.post("/model")
+async def set_model(body: ModelBody) -> dict:
+    if body.model not in ALLOWED_MODELS:
+        raise HTTPException(status_code=400, detail=f"model must be one of {ALLOWED_MODELS}")
+    app.state.ollama_model = body.model
+    app.state.extractor.set_model(body.model)
+    return {"model": body.model}
 
 
 @app.websocket("/ws")

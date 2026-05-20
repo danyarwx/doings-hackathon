@@ -57,6 +57,13 @@ class ExtractorWorker:
             return
         self._task = asyncio.create_task(self._loop())
 
+    def set_model(self, model: str) -> None:
+        self._model = model
+
+    @property
+    def model(self) -> str:
+        return self._model
+
     async def stop(self) -> None:
         if self._task is None:
             return
