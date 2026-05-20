@@ -12,6 +12,7 @@ const STATUS_DOT: Record<AiStatus, string> = {
   no_model: "bg-neon-amber",
   offline: "bg-neon-pink",
   loading: "bg-neon-cyan animate-pulse",
+  thinking: "bg-neon-blue animate-pulse",
   unknown: "bg-white/30",
 };
 
@@ -20,6 +21,7 @@ const STATUS_LABEL: Record<AiStatus, string> = {
   no_model: "Model not pulled",
   offline: "AI offline",
   loading: "Loading model…",
+  thinking: "Thinking…",
   unknown: "AI status unknown",
 };
 
@@ -40,6 +42,12 @@ function emptyCopy(status: AiStatus): { title: string; sub: string } {
     return {
       title: "Loading model…",
       sub: "Ollama is warming this model into memory. The first call after a swap can take 30–120s for larger models.",
+    };
+  }
+  if (status === "thinking") {
+    return {
+      title: "Thinking…",
+      sub: "The model is processing your last utterance. Larger models (qwen3, llama3.1) can take 10–30s per call.",
     };
   }
   return {

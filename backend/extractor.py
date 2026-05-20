@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import time
 from collections import deque
 from datetime import datetime, timezone
 from typing import Any
@@ -90,11 +91,22 @@ class ExtractorWorker:
             self._context.append(focus)
             return
         if self._in_flight:
-            print("[extractor] skip-if-busy: dropping utterance", file=sys.stderr)
+            print(
+                f"[extractor] skip-if-busy: dropping utterance ({len(focus.text)} chars)",
+                file=sys.stderr,
+            )
             self._context.append(focus)
             return
 
         self._in_flight = True
+        t0 = time.monotonic()
+        preview = focus.text[:80] + ("…" if len(focus.text) > 80 else "")
+        print(f"[extractor] -> {self._model}: {preview!r}", file=sys.stderr)
+        await self._hub.broadcast({
+            "type": "ai_status",
+            "state": "thinking",
+            "model": self._model,
+        })
         try:
             existing_texts = [
                 ins.text for ins in self._state.insights if ins.status != "declined"
@@ -107,6 +119,11 @@ class ExtractorWorker:
             try:
                 raw = await self._client.chat(messages=messages, model=self._model)
             except httpx.HTTPError as exc:
+                elapsed = time.monotonic() - t0
+                print(
+                    f"[extractor] LLM call failed after {elapsed:.1f}s: {exc}",
+                    file=sys.stderr,
+                )
                 await self._hub.broadcast({
                     "type": "ai_status",
                     "state": "offline",
@@ -115,15 +132,32 @@ class ExtractorWorker:
                 })
                 return
 
+            elapsed = time.monotonic() - t0
+            print(
+                f"[extractor] <- {self._model}: {elapsed:.1f}s, {len(raw)} chars",
+                file=sys.stderr,
+            )
+
             try:
                 data = json.loads(raw)
             except json.JSONDecodeError as exc:
-                print(f"[extractor] non-json reply: {exc}; raw={raw[:200]!r}", file=sys.stderr)
+                print(
+                    f"[extractor] non-json reply: {exc}; raw={raw[:300]!r}",
+                    file=sys.stderr,
+                )
+                await self._hub.broadcast({"type": "ai_status", "state": "ok", "model": self._model})
                 return
 
             candidates = data.get("requirements", []) or []
             if not isinstance(candidates, list):
+                print(f"[extractor] 'requirements' was not a list: {type(candidates)}", file=sys.stderr)
+                await self._hub.broadcast({"type": "ai_status", "state": "ok", "model": self._model})
                 return
+
+            print(
+                f"[extractor] {self._model} returned {len(candidates)} candidates",
+                file=sys.stderr,
+            )
 
             result = filter_candidates(
                 candidates,
@@ -152,6 +186,10 @@ class ExtractorWorker:
                 self._state.insights.append(ins)
                 await self._hub.broadcast({"type": "insight", "insight": _insight_to_dict(ins)})
 
+            print(
+                f"[extractor] kept {len(result.kept)} / dropped {len(result.dropped)}",
+                file=sys.stderr,
+            )
             await self._hub.broadcast({"type": "ai_status", "state": "ok", "model": self._model})
         finally:
             self._in_flight = False
