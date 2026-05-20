@@ -51,7 +51,15 @@ export function useSessionWs(): SessionView {
             return msg.session_id;
           });
         } else if (msg.type === "segment") {
-          setSegments((prev) => [...prev, msg.segment]);
+          const incoming = msg.segment;
+          if (!incoming.is_draft && incoming.replaces?.length) {
+            setSegments((prev) => [
+              ...prev.filter((s) => !incoming.replaces!.includes(s.id)),
+              incoming,
+            ]);
+          } else {
+            setSegments((prev) => [...prev, incoming]);
+          }
         } else if (msg.type === "insight") {
           setInsights((prev) => [...prev, msg.insight]);
         }

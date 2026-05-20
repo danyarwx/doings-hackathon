@@ -26,7 +26,15 @@ export default function SegmentCard({ segment }: { segment: Segment }) {
       >
         {segment.lang.toUpperCase()}
       </span>
-      <span className="text-white leading-relaxed">{segment.text}</span>
+      <span
+        className={
+          segment.is_draft
+            ? "text-white/40 leading-relaxed italic animate-pulse"
+            : "text-white leading-relaxed"
+        }
+      >
+        {segment.text}
+      </span>
     </div>
   );
 }

@@ -21,8 +21,12 @@ from pydantic import BaseModel
 
 from backend.delivery import deliver
 from backend.state import Segment, SessionState
+from capture.aggregator import ParagraphAggregator
 
 log = logging.getLogger("backend.server")
+
+PARAGRAPH_GAP_S = float(os.getenv("PARAGRAPH_GAP_S", "1.5"))
+MAX_PARAGRAPH_S = float(os.getenv("MAX_PARAGRAPH_S", "30.0"))
 
 # ---------------------------------------------------------------------------
 # Extraction — lazy background model load
@@ -225,6 +229,8 @@ async def lifespan(app: FastAPI):
     app.state.capture_proc = None
     app.state.past_sessions = []
     app.state.insight_log: list[dict] = []
+    app.state.aggregator = ParagraphAggregator(PARAGRAPH_GAP_S, MAX_PARAGRAPH_S)
+    app.state.draft_ids: list[str] = []
     # Start model load in background — server is ready immediately.
     threading.Thread(target=_load_model_bg, daemon=True).start()
     yield
@@ -328,6 +334,28 @@ def _utc_iso_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+async def _flush_paragraph(session_id: str) -> None:
+    """Emit any buffered in-progress paragraph as a final segment."""
+    for merged in app.state.aggregator.flush():
+        if not app.state.draft_ids:
+            continue
+        replaces = list(app.state.draft_ids)
+        app.state.draft_ids = []
+        final = Segment(
+            id=f"para-{uuid.uuid4().hex[:8]}",
+            session_id=session_id,
+            text=merged.text,
+            start_s=merged.start_s,
+            end_s=merged.end_s,
+            lang=merged.lang,
+        )
+        app.state.session.add_segment(final)
+        await app.state.hub.broadcast({
+            "type": "segment",
+            "segment": {**_segment_to_dict(final), "is_draft": False, "replaces": replaces},
+        })
+
+
 async def _monitor_capture(app: FastAPI) -> None:
     proc = app.state.capture_proc
     if proc is None:
@@ -361,6 +389,8 @@ async def control_start(body: StartBody | None = None) -> dict:
         _archive_current_session(app)
         app.state.session.reset(session_id=_new_session_id())
         app.state.insight_log = []
+        app.state.aggregator = ParagraphAggregator(PARAGRAPH_GAP_S, MAX_PARAGRAPH_S)
+        app.state.draft_ids = []
 
     session_id = app.state.session.session_id or _new_session_id()
     if app.state.session.session_id is None:
@@ -432,6 +462,9 @@ async def control_stop() -> dict:
             proc.kill()
             await asyncio.get_event_loop().run_in_executor(None, proc.wait)
     app.state.capture_proc = None
+    # Flush any buffered drafts into a final paragraph before archiving.
+    if app.state.session.session_id:
+        await _flush_paragraph(app.state.session.session_id)
     app.state.session.recording_state = "idle"
     await app.state.hub.broadcast({
         "type": "state",
@@ -504,9 +537,38 @@ async def post_segment(payload: SegmentIn) -> dict:
         end_s=payload.end_s,
         lang=payload.lang,
     )
-    app.state.session.add_segment(seg)
-    await app.state.hub.broadcast({"type": "segment", "segment": _segment_to_dict(seg)})
+    # 1. Broadcast immediately as a draft (not stored yet).
+    await app.state.hub.broadcast({
+        "type": "segment",
+        "segment": {**_segment_to_dict(seg), "is_draft": True, "replaces": []},
+    })
+
+    # 2. Deliver raw segment to staging endpoint (unchanged behaviour).
     asyncio.create_task(_deliver_and_report(seg))
+
+    # 3. Feed aggregator; emit final paragraph if a boundary fires.
+    ready = app.state.aggregator.add(seg)
+    if not ready:
+        app.state.draft_ids.append(seg.id)
+    else:
+        for merged in ready:
+            replaces = list(app.state.draft_ids)
+            app.state.draft_ids = [seg.id]  # triggering seg starts next paragraph
+            final = Segment(
+                id=f"para-{uuid.uuid4().hex[:8]}",
+                session_id=seg.session_id,
+                text=merged.text,
+                start_s=merged.start_s,
+                end_s=merged.end_s,
+                lang=merged.lang,
+            )
+            app.state.session.add_segment(final)
+            await app.state.hub.broadcast({
+                "type": "segment",
+                "segment": {**_segment_to_dict(final), "is_draft": False, "replaces": replaces},
+            })
+
+    # 4. LLM extraction buffer (unchanged).
     batch = _ext_buffer.add(seg.session_id, _segment_to_dict(seg))
     if batch is not None:
         asyncio.create_task(_run_extraction(seg.session_id, batch, app.state.hub, app.state.insight_log))

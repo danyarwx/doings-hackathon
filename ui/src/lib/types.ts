@@ -5,6 +5,8 @@ export type Segment = {
   start_s: number;
   end_s: number;
   lang: string;
+  is_draft?: boolean;
+  replaces?: string[];
 };
 
 export type PastSessionSummary = {
