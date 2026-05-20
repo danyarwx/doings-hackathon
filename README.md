@@ -115,9 +115,12 @@ If you want to point at the real `staging.doings.de/stt` instead, omit `DOINGS_E
 |---|---|---|
 | `OLLAMA_MODEL` | `phi3` | Local LLM for AI insights. Try `mistral`, `llama3.1`, `qwen2.5`. |
 | `OLLAMA_URL` | `http://localhost:11434` | Override if Ollama runs elsewhere. |
-| `EXTRACTOR_CONFIDENCE_FLOOR` | `0.6` | Filter floor — lower lets more candidates through. |
-| `EXTRACTOR_QUOTE_MATCH_RATIO` | `0.75` | Fuzziness for matching `source_quote` against the transcript. |
-| `EXTRACTOR_REQUIRE_SOURCE_QUOTE` | `true` | Set `false` to disable hallucination check. |
+| `BUFFER_MAX_SILENCE_S` | `1.5` | Silence gap (s) that flushes the sentence buffer. |
+| `BUFFER_MAX_DURATION_S` | `20.0` | Hard buffer-flush duration (s). |
+| `EXTRACTOR_MIN_TEXT_LEN` | `40` | Minimum chars for an extracted requirement. |
+| `EXTRACTOR_VERB_GATE` | `true` | Require a modal/intent verb in the extracted text. |
+| `EXTRACTOR_QUOTE_MATCH_RATIO` | `0.75` | Fuzziness for matching `source_quote` against the focus utterance. |
+| `EXTRACTOR_DEDUPE_RATIO` | `0.85` | Fuzzy similarity above which a candidate is treated as a duplicate. |
 | `DOINGS_ENDPOINT` | `https://staging.doings.de/stt` | Per-segment delivery target. |
 
 ### Terminal 3 — UI (Vite dev server)
@@ -166,7 +169,7 @@ All capture flags (`--model`, `--language`, `--prompt`, `--silence-gate-dbfs`, �
 | `npm run dev` shows `vite] ws proxy socket error: EPIPE` | Harmless dev-mode log when the WS upstream closes. The hook reconnects automatically. |
 | AI insights panel says "AI offline" | `ollama serve` isn't running. Start it; the panel reconnects within ~5s of the next tick. |
 | AI insights panel says "Model not installed" | Run `ollama pull phi3` (or whatever `OLLAMA_MODEL` is set to). |
-| Insights are too few / too many | Tune `EXTRACTOR_CONFIDENCE_FLOOR` (default `0.6`). Lower → more pass through; higher → stricter. Restart backend after changing env vars. |
+| Insights are too few / too many | Tune `EXTRACTOR_MIN_TEXT_LEN` (default `40`) or `EXTRACTOR_VERB_GATE` (default `true`). Lower min length or disable the verb gate → more pass through. Restart backend after env changes. |
 | Insights are wrong language or hallucinated | Switch model: `OLLAMA_MODEL=mistral` for German, `llama3.1` for stronger reasoning. Restart backend. |
 
 ---
