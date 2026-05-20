@@ -1,30 +1,30 @@
-"""Async worker that extracts requirements from the rolling transcript window."""
+"""Event-driven worker that extracts requirements from utterances.
+
+Consumes Utterances from a SentenceBuffer's queue. For each utterance, builds
+a FOCUS+CONTEXT prompt, calls the LLM, filters candidates, and broadcasts
+surviving Insights.
+
+Skip-if-busy: if an LLM call is in flight when a new utterance arrives, the
+new one is dropped (fresh signals matter more than catching every utterance).
+"""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import sys
+from collections import deque
 from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 
 from backend.extractor_filter import FilterConfig, filter_candidates
-from backend.extractor_prompt import build_messages
+from backend.extractor_prompt import CONTEXT_TAIL, build_messages
 from backend.insights import Insight
 from backend.ollama_client import OllamaClient
-from backend.state import Segment, SessionState
-
-DEFAULT_TICK_S = 5.0
-DEFAULT_WINDOW_S = 30.0
-
-
-def build_window(segments: list[Segment], window_s: float) -> list[Segment]:
-    if not segments:
-        return []
-    cutoff = max(0.0, segments[-1].end_s - window_s)
-    return [s for s in segments if s.end_s >= cutoff]
+from backend.sentence_buffer import SentenceBuffer, Utterance
+from backend.state import SessionState
 
 
 def _iso_now() -> str:
@@ -39,19 +39,18 @@ class ExtractorWorker:
         hub: Any,
         client: OllamaClient,
         model: str,
-        tick_s: float = DEFAULT_TICK_S,
-        window_s: float = DEFAULT_WINDOW_S,
+        buffer: SentenceBuffer,
     ) -> None:
         self._state = state
         self._hub = hub
         self._client = client
         self._model = model
-        self._tick_s = tick_s
-        self._window_s = window_s
+        self._buffer = buffer
         self._cfg = FilterConfig()
         self._in_flight = False
         self._counter = 0
         self._task: asyncio.Task | None = None
+        self._context: deque[Utterance] = deque(maxlen=CONTEXT_TAIL)
 
     def start(self) -> None:
         if self._task is not None:
@@ -70,21 +69,22 @@ class ExtractorWorker:
 
     async def _loop(self) -> None:
         while True:
-            await asyncio.sleep(self._tick_s)
             try:
-                await self._tick_once()
+                u = await self._buffer.queue.get()
+                await self._handle(u)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"[extractor] tick error: {exc}", file=sys.stderr)
+                print(f"[extractor] error: {exc}", file=sys.stderr)
 
-    async def _tick_once(self) -> None:
+    async def _handle(self, focus: Utterance) -> None:
         if self._state.recording_state != "recording":
+            # Still update context so a resumed session has continuity.
+            self._context.append(focus)
             return
         if self._in_flight:
-            return
-        window = build_window(self._state.segments, self._window_s)
-        if not window:
+            print("[extractor] skip-if-busy: dropping utterance", file=sys.stderr)
+            self._context.append(focus)
             return
 
         self._in_flight = True
@@ -92,7 +92,11 @@ class ExtractorWorker:
             existing_texts = [
                 ins.text for ins in self._state.insights if ins.status != "declined"
             ][-10:]
-            messages = build_messages(window=window, existing_texts=existing_texts)
+            messages = build_messages(
+                focus=focus,
+                context=list(self._context),
+                existing_texts=existing_texts,
+            )
             try:
                 raw = await self._client.chat(messages=messages, model=self._model)
             except httpx.HTTPError as exc:
@@ -116,7 +120,7 @@ class ExtractorWorker:
 
             result = filter_candidates(
                 candidates,
-                window=window,
+                focus=focus,
                 existing_texts=existing_texts,
                 cfg=self._cfg,
             )
@@ -130,11 +134,11 @@ class ExtractorWorker:
                     id=f"ins-{self._counter:03d}",
                     session_id=self._state.session_id or "sess-unknown",
                     category=cand["category"],
+                    certainty=cand["certainty"],
                     text=cand["text"],
                     original_text=cand["text"],
                     source_quote=str(cand.get("source_quote", "")),
                     language=str(cand.get("language", "en")),
-                    confidence=float(cand.get("confidence", 0.0)),
                     status="pending",
                     created_at_iso=_iso_now(),
                 )
@@ -144,6 +148,7 @@ class ExtractorWorker:
             await self._hub.broadcast({"type": "ai_status", "state": "ok", "model": self._model})
         finally:
             self._in_flight = False
+            self._context.append(focus)
 
 
 def _insight_to_dict(ins: Insight) -> dict:
@@ -151,11 +156,11 @@ def _insight_to_dict(ins: Insight) -> dict:
         "id": ins.id,
         "session_id": ins.session_id,
         "category": ins.category,
+        "certainty": ins.certainty,
         "text": ins.text,
         "original_text": ins.original_text,
         "source_quote": ins.source_quote,
         "language": ins.language,
-        "confidence": ins.confidence,
         "status": ins.status,
         "created_at_iso": ins.created_at_iso,
     }

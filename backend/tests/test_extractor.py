@@ -1,151 +1,110 @@
 import asyncio
 import json
-from unittest.mock import AsyncMock
-
 import pytest
 
-from backend.extractor import ExtractorWorker, build_window
-from backend.state import Segment, SessionState
+from backend.extractor import ExtractorWorker
+from backend.sentence_buffer import SentenceBuffer, Utterance
+from backend.state import SessionState
 
 
-def _seg(text: str, end: float, lang: str = "en") -> Segment:
-    return Segment(
-        id=f"seg-{int(end)}", session_id="s1", text=text, start_s=max(0.0, end - 1.0), end_s=end, lang=lang
-    )
+class StubHub:
+    def __init__(self) -> None:
+        self.messages: list[dict] = []
+
+    async def broadcast(self, msg: dict) -> None:
+        self.messages.append(msg)
 
 
-def test_build_window_keeps_recent():
-    segs = [_seg(f"t{i}", end=float(i)) for i in range(60)]
-    window = build_window(segs, window_s=30.0)
-    assert window[-1].end_s == 59.0
-    assert window[0].end_s >= 29.0
+class StubClient:
+    def __init__(self, responses: list[str]) -> None:
+        self._responses = list(responses)
+        self.calls: list[dict] = []
+
+    async def chat(self, *, messages, model):
+        self.calls.append({"messages": messages, "model": model})
+        if not self._responses:
+            return json.dumps({"requirements": []})
+        return self._responses.pop(0)
 
 
-def test_build_window_empty():
-    assert build_window([], window_s=30.0) == []
+def _utt(text: str, start: float = 0.0, end: float = 3.0, lang: str = "en") -> Utterance:
+    return Utterance(text=text, start_s=start, end_s=end, lang=lang, segment_ids=["s1"])
+
+
+def _good_candidate(text: str) -> dict:
+    return {
+        "is_requirement": True,
+        "reasoning": "modal + clause",
+        "text": text,
+        "category": "functional",
+        "source_quote": text,
+        "language": "en",
+        "certainty": "explicit",
+    }
 
 
 @pytest.mark.asyncio
-async def test_tick_skips_when_idle():
+async def test_worker_processes_utterance_and_broadcasts_insight():
+    state = SessionState()
+    state.recording_state = "recording"
+    state.session_id = "sess-x"
+    hub = StubHub()
+    text = "The dashboard must show monthly revenue for all regions."
+    client = StubClient([json.dumps({"requirements": [_good_candidate(text)]})])
+    buffer = SentenceBuffer()
+    worker = ExtractorWorker(state=state, hub=hub, client=client, model="phi3", buffer=buffer)
+    worker.start()
+    try:
+        await buffer.queue.put(_utt(text))
+        # Give the worker time to consume + process.
+        await asyncio.sleep(0.05)
+        assert any(m["type"] == "insight" for m in hub.messages)
+        ins_msg = next(m for m in hub.messages if m["type"] == "insight")
+        assert ins_msg["insight"]["certainty"] == "explicit"
+        assert "confidence" not in ins_msg["insight"]
+    finally:
+        await worker.stop()
+
+
+@pytest.mark.asyncio
+async def test_worker_no_op_when_not_recording():
     state = SessionState()
     state.recording_state = "idle"
-    client = AsyncMock()
-    hub = AsyncMock()
-    w = ExtractorWorker(state=state, hub=hub, client=client, model="phi3")
-    await w._tick_once()
-    client.chat.assert_not_called()
+    hub = StubHub()
+    client = StubClient([json.dumps({"requirements": []})])
+    buffer = SentenceBuffer()
+    worker = ExtractorWorker(state=state, hub=hub, client=client, model="phi3", buffer=buffer)
+    worker.start()
+    try:
+        await buffer.queue.put(_utt("anything."))
+        await asyncio.sleep(0.05)
+        assert client.calls == []  # LLM not called
+    finally:
+        await worker.stop()
 
 
 @pytest.mark.asyncio
-async def test_tick_extracts_and_broadcasts():
+async def test_worker_passes_context_window():
     state = SessionState()
-    state.session_id = "s1"
     state.recording_state = "recording"
-    state.segments.append(_seg("The system must handle 500 concurrent users.", end=5.0))
-
-    client = AsyncMock()
-    client.chat.return_value = json.dumps({
-        "requirements": [{
-            "is_requirement": True,
-            "reasoning": "modal verb + system constraint",
-            "text": "The system must handle 500 concurrent users.",
-            "category": "non_functional",
-            "source_quote": "The system must handle 500 concurrent users.",
-            "language": "en",
-            "confidence": 0.9,
-        }]
-    })
-    hub = AsyncMock()
-
-    w = ExtractorWorker(state=state, hub=hub, client=client, model="phi3")
-    await w._tick_once()
-
-    assert len(state.insights) == 1
-    assert state.insights[0].category == "non_functional"
-    hub.broadcast.assert_called()
-    first_call_args = hub.broadcast.call_args_list[0].args[0]
-    assert first_call_args["type"] == "insight"
-
-
-@pytest.mark.asyncio
-async def test_tick_drops_low_confidence():
-    state = SessionState()
-    state.session_id = "s1"
-    state.recording_state = "recording"
-    state.segments.append(_seg("The system must handle 500 users.", end=5.0))
-
-    client = AsyncMock()
-    client.chat.return_value = json.dumps({
-        "requirements": [{
-            "is_requirement": True,
-            "reasoning": "not sure",
-            "text": "The system must handle 500 users.",
-            "category": "functional",
-            "source_quote": "The system must handle 500 users.",
-            "language": "en",
-            "confidence": 0.3,
-        }]
-    })
-    hub = AsyncMock()
-    w = ExtractorWorker(state=state, hub=hub, client=client, model="phi3")
-    await w._tick_once()
-
-    assert state.insights == []
-
-
-@pytest.mark.asyncio
-async def test_tick_handles_invalid_json():
-    state = SessionState()
-    state.session_id = "s1"
-    state.recording_state = "recording"
-    state.segments.append(_seg("hi", end=1.0))
-
-    client = AsyncMock()
-    client.chat.return_value = "not even json"
-    hub = AsyncMock()
-    w = ExtractorWorker(state=state, hub=hub, client=client, model="phi3")
-    await w._tick_once()
-
-    assert state.insights == []
-
-
-@pytest.mark.asyncio
-async def test_tick_skips_when_inflight():
-    state = SessionState()
-    state.session_id = "s1"
-    state.recording_state = "recording"
-    state.segments.append(_seg("hi", end=1.0))
-
-    async def slow_chat(*a, **kw):
-        await asyncio.sleep(0.1)
-        return json.dumps({"requirements": []})
-
-    client = AsyncMock()
-    client.chat.side_effect = slow_chat
-    hub = AsyncMock()
-    w = ExtractorWorker(state=state, hub=hub, client=client, model="phi3")
-
-    t1 = asyncio.create_task(w._tick_once())
-    await asyncio.sleep(0.01)
-    await w._tick_once()
-    await t1
-
-    assert client.chat.call_count == 1
-
-
-@pytest.mark.asyncio
-async def test_tick_broadcasts_ai_status_offline():
-    import httpx
-    state = SessionState()
-    state.session_id = "s1"
-    state.recording_state = "recording"
-    state.segments.append(_seg("hi", end=1.0))
-
-    client = AsyncMock()
-    client.chat.side_effect = httpx.ConnectError("nope")
-    hub = AsyncMock()
-    w = ExtractorWorker(state=state, hub=hub, client=client, model="phi3")
-    await w._tick_once()
-
-    calls = [c.args[0] for c in hub.broadcast.call_args_list]
-    assert any(c.get("type") == "ai_status" and c.get("state") == "offline" for c in calls)
+    state.session_id = "sess-x"
+    hub = StubHub()
+    client = StubClient([
+        json.dumps({"requirements": []}),
+        json.dumps({"requirements": []}),
+    ])
+    buffer = SentenceBuffer()
+    worker = ExtractorWorker(state=state, hub=hub, client=client, model="phi3", buffer=buffer)
+    worker.start()
+    try:
+        await buffer.queue.put(_utt("We're building a CRM.", 0.0, 2.0))
+        await asyncio.sleep(0.05)
+        await buffer.queue.put(_utt("It must support Salesforce sync.", 2.0, 5.0))
+        await asyncio.sleep(0.05)
+        # Second call should include first utterance in CONTEXT.
+        assert len(client.calls) == 2
+        second_user_msg = client.calls[1]["messages"][1]["content"]
+        assert "CONTEXT" in second_user_msg
+        assert "We're building a CRM." in second_user_msg
+    finally:
+        await worker.stop()
