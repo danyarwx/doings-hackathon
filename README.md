@@ -10,7 +10,7 @@ See [voicespec-prd-v3.md](voicespec-prd-v3.md) for the full PRD and [CLAUDE.md](
 doings/
 ├── capture/   Python: mic → whisper.cpp (pywhispercpp) → POST /segments to backend
 ├── backend/   FastAPI: WS fan-out to UI + HTTPS delivery to staging.doings.de + Start/Stop subprocess control
-├── ui/        React + Vite + TS + Tailwind: 3-column dark dashboard
+├── ui/        React + Vite + TS + Tailwind: dark dashboard with top nav (History · Vocabulary · Model picker)
 └── docs/      design specs and implementation plans
 ```
 
@@ -135,14 +135,17 @@ Open **http://localhost:5173** in a browser.
 ### Using the dashboard
 
 1. **Wait for the WebSocket to connect** — the header dot turns gray ("Idle") instead of pink ("Backend offline").
-2. **Click ▶ Start** — backend spawns `capture/` as a subprocess. The dot turns red, the timer starts.
+2. **(Optional) Set your meeting vocabulary** — click **Vocabulary** in the top nav, type domain jargon, acronyms, product/people names (comma-separated is fine), and **Save**. Whisper picks this up as a `--prompt` hint on the next ▶ Start. Helps spelling for things like *Salesforce, Telekom, OAuth, Q4 OKRs*.
+3. **(Optional) Pick a model** — the chip showing `phi3` in the top nav opens a model dropdown (`phi3` / `mistral` / `llama3.1`). Swap any time; the backend updates the active model without restart.
+4. **Click ▶ Start** — backend spawns `capture/` as a subprocess. The dot turns red, the timer starts.
    - On the first run, macOS will prompt for microphone permission. Allow it.
    - On the first run, whisper downloads its model — this can take a minute. Watch terminal 2 for `[transcribe] loading model 'medium'...` followed by `model loaded.`.
-3. **Speak.** Within ~3 seconds:
+5. **Speak.** Within ~3 seconds:
    - The **Live Transcript** panel shows `[mm:ss.s] [DE/EN] text` lines.
    - Terminal 1 (echo) prints each segment as it arrives.
-4. **AI Insights** panel fills in within ~5–12s of an utterance (if Ollama is running). Each card has **Approve / Edit / Decline** controls. The header dot shows the AI status (green = ok, amber = model not pulled, pink = offline, gray = unknown).
-5. **Click ■ Stop** — sends SIGINT to the capture subprocess. Dot returns to gray.
+6. **AI Insights** appear after each natural pause (silence > 1.5s) or every 20s of continuous speech. The `SentenceBuffer` aggregates whisper's 2s fragments first so the LLM sees coherent sentences. Each card shows a **category** badge (functional / non-functional), a **certainty** badge (cyan **Explicit** = stated outright, amber **Implied** = inferred from context), and **Approve / Edit / Decline** controls. The header dot shows the AI status (green = ok, amber = model not pulled, pink = offline, gray = unknown).
+7. **History** lives in the top nav — click to browse past sessions; clicking one swaps the transcript panel into a read-only past-session view. Use **← Back to live** to return.
+8. **Click ■ Stop** — sends SIGINT to the capture subprocess. Dot returns to gray. **Export** in the nav is greyed out — it's the Step 4 placeholder.
 
 ### Running capture standalone (no UI)
 
@@ -178,7 +181,7 @@ All capture flags (`--model`, `--language`, `--prompt`, `--silence-gate-dbfs`, �
 
 ```bash
 PYTHONPATH=. capture/.venv/bin/pytest capture/tests -q          # 28 tests
-PYTHONPATH=. backend/.venv/bin/pytest backend/tests -q          # 56 tests
+PYTHONPATH=. backend/.venv/bin/pytest backend/tests -q          # 58 tests
 cd ui && npx tsc --noEmit                                       # UI type check
 ```
 
@@ -192,5 +195,5 @@ The project is built in four sequential roadmap steps. **Each step works end-to-
 
 1. **Terminal Live STT** ✅ — mic → terminal lines (`capture/`)
 2. **Beautiful Web UI** ✅ — FastAPI + React dashboard + delivery (`backend/`, `ui/`)
-3. **Local LLM Analysis** ✅ — Ollama (phi3 default) extracts requirements from a rolling 30s window; Approve / Edit / Decline cards in the Insights panel
-4. **Requirements & Tickets** 🔲 — aggregate approved items → structured spec → Doings ingest
+3. **Local LLM Analysis** ✅ — `SentenceBuffer` aggregates whisper fragments into utterances; an event-driven `ExtractorWorker` calls Ollama (phi3 default) with a FOCUS+CONTEXT prompt; gated filter (length / verb / fuzzy dedupe) drops slop; Approve / Edit / Decline cards in the Insights panel. Live model swap and vocabulary hints from the top nav.
+4. **Requirements & Tickets** 🔲 — on Stop, run a richer LLM pass over approved cards + full transcript → Jira-ready JSON (user stories with Given/When/Then, acceptance criteria, INVEST validation, action items, decisions, topics) → reviewable Export view → Jira push. See [docs/superpowers/specs/2026-05-20-step3-quality-pass-design.md](docs/superpowers/specs/2026-05-20-step3-quality-pass-design.md) "Future work" for the design sketch.
