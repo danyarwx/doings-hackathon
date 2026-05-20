@@ -1,4 +1,13 @@
-"""5-gate quality filter for LLM-extracted requirement candidates."""
+"""Quality filter for LLM-extracted requirement candidates.
+
+Gates, in order:
+  1. is_requirement  — LLM's own self-assessment must be True
+  2. length          — text.strip() length >= EXTRACTOR_MIN_TEXT_LEN
+  3. verb            — text must contain a modal or intent verb (EN+DE)
+  4. source_quote    — quote must (fuzzy-)match a span in the focus utterance
+  5. dedupe          — text must not fuzzy-match (>= ratio) any existing text
+  6. schema          — category, language, certainty in allowed sets
+"""
 
 from __future__ import annotations
 
@@ -8,9 +17,9 @@ from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from typing import Literal
 
-from backend.state import Segment
+from backend.sentence_buffer import Utterance
 
-GateName = Literal["is_requirement", "confidence", "source_quote", "dedup", "schema"]
+GateName = Literal["is_requirement", "length", "verb", "source_quote", "dedupe", "schema"]
 
 
 def _env_float(name: str, default: float) -> float:
@@ -19,6 +28,16 @@ def _env_float(name: str, default: float) -> float:
         return default
     try:
         return float(raw)
+    except ValueError:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
     except ValueError:
         return default
 
@@ -32,9 +51,10 @@ def _env_bool(name: str, default: bool) -> bool:
 
 @dataclass(frozen=True)
 class FilterConfig:
-    confidence_floor: float = field(default_factory=lambda: _env_float("EXTRACTOR_CONFIDENCE_FLOOR", 0.6))
+    min_text_len: int = field(default_factory=lambda: _env_int("EXTRACTOR_MIN_TEXT_LEN", 40))
+    verb_gate: bool = field(default_factory=lambda: _env_bool("EXTRACTOR_VERB_GATE", True))
     quote_match_ratio: float = field(default_factory=lambda: _env_float("EXTRACTOR_QUOTE_MATCH_RATIO", 0.75))
-    require_source_quote: bool = field(default_factory=lambda: _env_bool("EXTRACTOR_REQUIRE_SOURCE_QUOTE", True))
+    dedupe_ratio: float = field(default_factory=lambda: _env_float("EXTRACTOR_DEDUPE_RATIO", 0.85))
 
 
 @dataclass(frozen=True)
@@ -58,19 +78,51 @@ def _normalize(s: str) -> str:
 
 
 _VALID_CATEGORY = {"functional", "non_functional"}
+_VALID_CERTAINTY = {"explicit", "implied"}
+
+# Word-boundary, case-insensitive. Multi-word forms ("needs to", "has to") use
+# explicit spacing; single tokens use \b boundaries.
+_VERB_PATTERNS = [
+    # English modal
+    r"\bmust\b", r"\bshall\b", r"\bshould\b", r"\bwill\b",
+    r"\bneeds?\s+to\b", r"\bhas\s+to\b", r"\bhave\s+to\b",
+    # English intent
+    r"\bneed\b", r"\bwant\b", r"\badd\b", r"\bshow\b",
+    r"\bsupport\b", r"\ballow\b", r"\bintegrate\b",
+    # German modal
+    r"\bmuss\b", r"\bsoll\b", r"\bsollte\b", r"\bwird\b", r"\bbraucht\b",
+    # German intent
+    r"\bbrauchen\b", r"\bwollen\b", r"\bhinzufügen\b",
+    r"\bzeigen\b", r"\bunterstützen\b",
+]
+_VERB_RE = re.compile("|".join(_VERB_PATTERNS), re.IGNORECASE | re.UNICODE)
 
 
-def _matches_any_segment(quote: str, window: list[Segment], ratio: float) -> bool:
+def _contains_verb(text: str) -> bool:
+    return bool(_VERB_RE.search(text))
+
+
+def _matches_focus(quote: str, focus: Utterance, ratio: float) -> bool:
     nq = _normalize(quote)
     if not nq:
         return False
-    for seg in window:
-        ns = _normalize(seg.text)
-        if not ns:
+    ns = _normalize(focus.text)
+    if not ns:
+        return False
+    if nq in ns:
+        return True
+    return SequenceMatcher(None, nq, ns).ratio() >= ratio
+
+
+def _is_near_duplicate(text: str, existing_texts: list[str], ratio: float) -> bool:
+    nt = _normalize(text)
+    if not nt:
+        return False
+    for ex in existing_texts:
+        ne = _normalize(ex)
+        if not ne:
             continue
-        if nq in ns:
-            return True
-        if SequenceMatcher(None, nq, ns).ratio() >= ratio:
+        if SequenceMatcher(None, nt, ne).ratio() >= ratio:
             return True
     return False
 
@@ -78,64 +130,68 @@ def _matches_any_segment(quote: str, window: list[Segment], ratio: float) -> boo
 def filter_candidates(
     candidates: list[dict],
     *,
-    window: list[Segment],
+    focus: Utterance,
     existing_texts: list[str],
     cfg: FilterConfig,
 ) -> FilterResult:
     kept: list[dict] = []
     dropped: list[DroppedCandidate] = []
-    existing_norm = {_normalize(t) for t in existing_texts}
 
     for c in candidates:
-        # Gate 1: is_requirement flag
+        # Gate 1
         if not c.get("is_requirement", False):
-            dropped.append(
-                DroppedCandidate(gate="is_requirement", reason=str(c.get("reasoning", "")), candidate=c)
-            )
+            dropped.append(DroppedCandidate(
+                gate="is_requirement", reason=str(c.get("reasoning", "")), candidate=c,
+            ))
             continue
 
-        # Gate 2: confidence
-        conf = c.get("confidence")
-        try:
-            conf_f = float(conf) if conf is not None else 0.0
-        except (TypeError, ValueError):
-            conf_f = 0.0
-        if conf_f < cfg.confidence_floor:
-            dropped.append(
-                DroppedCandidate(gate="confidence", reason=f"{conf_f:.2f} < {cfg.confidence_floor}", candidate=c)
-            )
-            continue
-
-        # Gate 3: source_quote match
-        if cfg.require_source_quote:
-            quote = str(c.get("source_quote", ""))
-            if not _matches_any_segment(quote, window, cfg.quote_match_ratio):
-                dropped.append(
-                    DroppedCandidate(gate="source_quote", reason="quote not in window", candidate=c)
-                )
-                continue
-
-        # Gate 4: exact-text dedup
         text = str(c.get("text", "")).strip()
-        if _normalize(text) in existing_norm:
-            dropped.append(DroppedCandidate(gate="dedup", reason="text exists", candidate=c))
+
+        # Gate 2: length
+        if len(text) < cfg.min_text_len:
+            dropped.append(DroppedCandidate(
+                gate="length", reason=f"{len(text)} < {cfg.min_text_len}", candidate=c,
+            ))
             continue
 
-        # Gate 5: schema sanity
+        # Gate 3: verb
+        if cfg.verb_gate and not _contains_verb(text):
+            dropped.append(DroppedCandidate(
+                gate="verb", reason="no modal/intent verb", candidate=c,
+            ))
+            continue
+
+        # Gate 4: source_quote (always on)
+        quote = str(c.get("source_quote", ""))
+        if not _matches_focus(quote, focus, cfg.quote_match_ratio):
+            dropped.append(DroppedCandidate(
+                gate="source_quote", reason="quote not in focus", candidate=c,
+            ))
+            continue
+
+        # Gate 5: fuzzy dedupe
+        if _is_near_duplicate(text, existing_texts, cfg.dedupe_ratio):
+            dropped.append(DroppedCandidate(
+                gate="dedupe", reason="near-duplicate of existing", candidate=c,
+            ))
+            continue
+
+        # Gate 6: schema sanity
         category = c.get("category")
+        certainty = c.get("certainty")
         language = c.get("language")
         if (
             category not in _VALID_CATEGORY
-            or not isinstance(text, str)
-            or not text
-            or len(text) > 500
+            or certainty not in _VALID_CERTAINTY
             or not isinstance(language, str)
             or len(language) != 2
+            or len(text) > 500
         ):
-            dropped.append(DroppedCandidate(gate="schema", reason="invalid schema", candidate=c))
+            dropped.append(DroppedCandidate(
+                gate="schema", reason="invalid schema", candidate=c,
+            ))
             continue
 
-        # Survived — strip internal-only fields before returning
         survivor = {k: v for k, v in c.items() if k not in ("is_requirement", "reasoning")}
         survivor["text"] = text
         kept.append(survivor)
