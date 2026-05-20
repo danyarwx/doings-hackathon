@@ -17,8 +17,10 @@ type Props = {
 
 const MODELS = [
   { id: "phi3", label: "phi3", hint: "fast (~2.4 GB)" },
+  { id: "phi4-mini:3.8b", label: "phi4-mini", hint: "newer phi, stronger (~2.5 GB)" },
   { id: "mistral", label: "mistral", hint: "stronger German (~4 GB)" },
   { id: "llama3.1", label: "llama3.1", hint: "best reasoning (~5 GB)" },
+  { id: "qwen3:8b", label: "qwen3 8B", hint: "newest qwen, very capable (~5.2 GB)" },
 ] as const;
 
 function fmtTime(iso: string): string {

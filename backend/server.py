@@ -478,7 +478,14 @@ async def set_vocabulary(body: VocabularyBody) -> dict:
     return {"text": text}
 
 
-ALLOWED_MODELS = ("phi3", "mistral", "llama3.1", "qwen2.5")
+ALLOWED_MODELS = (
+    "phi3",
+    "phi4-mini:3.8b",
+    "mistral",
+    "llama3.1",
+    "qwen2.5",
+    "qwen3:8b",
+)
 
 
 class ModelBody(BaseModel):
