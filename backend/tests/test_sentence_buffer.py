@@ -9,17 +9,13 @@ def _seg(id_: str, text: str, start: float, end: float, lang: str = "en") -> Seg
 
 
 @pytest.mark.asyncio
-async def test_flush_on_terminal_punctuation():
-    buf = SentenceBuffer()
-    await buf.add(_seg("s1", "The dashboard must show", 0.0, 2.0))
-    assert buf.queue.empty()
+async def test_punctuation_alone_does_not_flush():
+    # Whisper emits "." at every ~2s chunk boundary, so terminal punctuation
+    # is not a reliable sentence boundary. Buffer should keep aggregating.
+    buf = SentenceBuffer(max_silence_s=1.5, max_duration_s=20.0)
+    await buf.add(_seg("s1", "The dashboard must show.", 0.0, 2.0))
     await buf.add(_seg("s2", "monthly revenue.", 2.0, 4.0))
-    u = await asyncio.wait_for(buf.queue.get(), timeout=0.1)
-    assert u.text == "The dashboard must show monthly revenue."
-    assert u.start_s == 0.0
-    assert u.end_s == 4.0
-    assert u.segment_ids == ["s1", "s2"]
-    assert u.lang == "en"
+    assert buf.queue.empty()
 
 
 @pytest.mark.asyncio
@@ -48,10 +44,12 @@ async def test_flush_on_max_duration():
 
 @pytest.mark.asyncio
 async def test_blank_audio_segment_dropped():
-    buf = SentenceBuffer()
+    buf = SentenceBuffer(max_silence_s=1.5, max_duration_s=20.0)
     await buf.add(_seg("s1", "[BLANK_AUDIO]", 0.0, 2.0))
     await buf.add(_seg("s2", "", 2.0, 4.0))
     await buf.add(_seg("s3", "real content.", 4.0, 6.0))
+    # Force a flush via silence gap.
+    await buf.add(_seg("s4", "next utterance.", 10.0, 12.0))
     u = await asyncio.wait_for(buf.queue.get(), timeout=0.1)
     assert u.text == "real content."
     assert u.segment_ids == ["s3"]
@@ -59,20 +57,23 @@ async def test_blank_audio_segment_dropped():
 
 @pytest.mark.asyncio
 async def test_reset_discards_pending():
-    buf = SentenceBuffer()
-    await buf.add(_seg("s1", "partial thought", 0.0, 2.0))
+    buf = SentenceBuffer(max_silence_s=1.5, max_duration_s=2.0)
+    await buf.add(_seg("s1", "partial thought", 0.0, 1.0))
     buf.reset()
-    # Adding a new segment after reset should start fresh, no flush
-    await buf.add(_seg("s2", "new sentence.", 0.0, 2.0))
+    # New segment after reset; trigger flush via max-duration.
+    await buf.add(_seg("s2", "new sentence starts", 0.0, 1.0))
+    await buf.add(_seg("s3", "and continues here", 1.0, 2.5))
     u = await asyncio.wait_for(buf.queue.get(), timeout=0.1)
-    assert u.segment_ids == ["s2"]
+    assert u.segment_ids == ["s2", "s3"]
 
 
 @pytest.mark.asyncio
 async def test_majority_lang_with_first_on_tie():
-    buf = SentenceBuffer()
+    buf = SentenceBuffer(max_silence_s=1.5, max_duration_s=20.0)
     await buf.add(_seg("s1", "Wir brauchen", 0.0, 2.0, lang="de"))
     await buf.add(_seg("s2", "support.", 2.0, 4.0, lang="en"))
-    # 1 de + 1 en → tie → first wins
+    # Force flush via silence gap.
+    await buf.add(_seg("s3", "next.", 10.0, 12.0, lang="en"))
     u = await asyncio.wait_for(buf.queue.get(), timeout=0.1)
+    # 1 de + 1 en → tie → first wins
     assert u.lang == "de"

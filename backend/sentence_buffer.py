@@ -1,10 +1,13 @@
 """Aggregates whisper Segments into coherent Utterances for the LLM extractor.
 
-Flushes when any of these fire:
-  1. Buffer's concatenated text ends in . ! ?
-  2. Silence gap to next segment > BUFFER_MAX_SILENCE_S (the triggering segment
+Flushes when either of these fire:
+  1. Silence gap to next segment > BUFFER_MAX_SILENCE_S (the triggering segment
      starts the *next* buffer; it is not included in the flush).
-  3. Buffer duration reaches BUFFER_MAX_DURATION_S.
+  2. Buffer duration reaches BUFFER_MAX_DURATION_S.
+
+We deliberately do NOT flush on terminal punctuation. Whisper appends "." at
+every ~2s chunk boundary regardless of whether the sentence has ended, so
+punctuation is not a reliable boundary signal.
 
 Blank-audio segments (text="" or "[BLANK_AUDIO]") are dropped.
 """
@@ -47,10 +50,6 @@ def _is_blank(seg: Segment) -> bool:
     return not t or t == "[BLANK_AUDIO]"
 
 
-def _ends_sentence(text: str) -> bool:
-    return text.rstrip().endswith((".", "!", "?"))
-
-
 def _majority_lang(segments: list[Segment]) -> str:
     counts = Counter(s.lang for s in segments)
     top = counts.most_common()
@@ -86,8 +85,10 @@ class SentenceBuffer:
 
         self._pending.append(seg)
 
-        # Punctuation or max-duration flush after appending.
-        if _ends_sentence(seg.text) or self._current_duration() >= self._max_duration_s:
+        # Max-duration flush after appending. Whisper emits "." at every chunk
+        # boundary, so we deliberately do NOT flush on terminal punctuation —
+        # silence gaps and the hard duration cap are the only triggers.
+        if self._current_duration() >= self._max_duration_s:
             await self._flush()
 
     def reset(self) -> None:
