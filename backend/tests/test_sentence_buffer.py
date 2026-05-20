@@ -43,16 +43,48 @@ async def test_flush_on_max_duration():
 
 
 @pytest.mark.asyncio
-async def test_blank_audio_segment_dropped():
+async def test_blank_audio_segment_dropped_and_does_not_break_aggregation():
     buf = SentenceBuffer(max_silence_s=1.5, max_duration_s=20.0)
     await buf.add(_seg("s1", "[BLANK_AUDIO]", 0.0, 2.0))
     await buf.add(_seg("s2", "", 2.0, 4.0))
-    await buf.add(_seg("s3", "real content.", 4.0, 6.0))
+    await buf.add(_seg("s3", "real content here.", 4.0, 6.0))
     # Force a flush via silence gap.
     await buf.add(_seg("s4", "next utterance.", 10.0, 12.0))
     u = await asyncio.wait_for(buf.queue.get(), timeout=0.1)
-    assert u.text == "real content."
+    assert u.text == "real content here."
     assert u.segment_ids == ["s3"]
+
+
+@pytest.mark.asyncio
+async def test_bracketed_noise_flushes_pending():
+    # Whisper emits "(crowd chattering)", "(music)", "[typing]" when it hears
+    # no speech. Treat those as a pause: flush whatever was pending, drop the
+    # noise segment itself.
+    buf = SentenceBuffer(max_silence_s=1.5, max_duration_s=20.0)
+    await buf.add(_seg("s1", "Sales reports should export to CSV.", 0.0, 2.0))
+    await buf.add(_seg("s2", "(crowd chattering)", 2.0, 4.0))
+    u = await asyncio.wait_for(buf.queue.get(), timeout=0.1)
+    assert u.text == "Sales reports should export to CSV."
+    assert u.segment_ids == ["s1"]
+    # Buffer is now empty; the chatter segment is not the start of a new one.
+    assert buf.queue.empty()
+    await buf.add(_seg("s3", "next sentence.", 4.0, 6.0))
+    assert buf.queue.empty()  # still pending, no flush yet
+
+
+@pytest.mark.asyncio
+async def test_other_noise_descriptors_treated_as_noise():
+    buf = SentenceBuffer(max_silence_s=1.5, max_duration_s=20.0)
+    await buf.add(_seg("s1", "The dashboard must show revenue.", 0.0, 2.0))
+    # Various whisper noise tags
+    await buf.add(_seg("s2", "[music]", 2.0, 4.0))
+    u1 = await asyncio.wait_for(buf.queue.get(), timeout=0.1)
+    assert u1.segment_ids == ["s1"]
+
+    await buf.add(_seg("s3", "Auth uses OAuth.", 4.0, 6.0))
+    await buf.add(_seg("s4", "* sighs *", 6.0, 8.0))
+    u2 = await asyncio.wait_for(buf.queue.get(), timeout=0.1)
+    assert u2.segment_ids == ["s3"]
 
 
 @pytest.mark.asyncio

@@ -1,21 +1,23 @@
 """Aggregates whisper Segments into coherent Utterances for the LLM extractor.
 
-Flushes when either of these fire:
+Flushes when any of these fire:
   1. Silence gap to next segment > BUFFER_MAX_SILENCE_S (the triggering segment
      starts the *next* buffer; it is not included in the flush).
-  2. Buffer duration reaches BUFFER_MAX_DURATION_S.
+  2. A noise-only segment arrives ([BLANK_AUDIO], "(crowd chattering)", "[music]"
+     etc.) — whisper emits these when it hears no speech, so we treat them as
+     the speaker stopping. The noise segment itself is dropped.
+  3. Buffer duration reaches BUFFER_MAX_DURATION_S.
 
 We deliberately do NOT flush on terminal punctuation. Whisper appends "." at
 every ~2s chunk boundary regardless of whether the sentence has ended, so
 punctuation is not a reliable boundary signal.
-
-Blank-audio segments (text="" or "[BLANK_AUDIO]") are dropped.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+import re
 from collections import Counter
 from dataclasses import dataclass
 
@@ -45,9 +47,18 @@ class Utterance:
     segment_ids: list[str]
 
 
-def _is_blank(seg: Segment) -> bool:
+# Whisper's "no speech" audio descriptors: [BLANK_AUDIO], (crowd chattering),
+# [music], (typing), * sighs *, etc. Matches when the entire stripped text is
+# wrapped in (), [], or *…*. These are not transcribed speech — treat them as
+# a pause signal and drop the segment.
+_NOISE_RE = re.compile(r"^\s*[\(\[\*][^()\[\]\*]*[\)\]\*]\s*$")
+
+
+def _is_noise(seg: Segment) -> bool:
     t = seg.text.strip()
-    return not t or t == "[BLANK_AUDIO]"
+    if not t:
+        return True
+    return bool(_NOISE_RE.match(t))
 
 
 def _majority_lang(segments: list[Segment]) -> str:
@@ -74,7 +85,10 @@ class SentenceBuffer:
         self.queue: asyncio.Queue[Utterance] = asyncio.Queue()
 
     async def add(self, seg: Segment) -> None:
-        if _is_blank(seg):
+        # Noise / blank-audio segments are treated as a pause: flush whatever
+        # was buffered, then drop the noise segment itself.
+        if _is_noise(seg):
+            await self._flush()
             return
 
         # Silence-gap check fires BEFORE appending the new segment.
