@@ -161,7 +161,7 @@ def _map_to_insights(data: dict, batch: list, session_id: str) -> list[dict]:
     return results
 
 
-async def _run_extraction(session_id: str, batch: list, hub: "Hub") -> None:
+async def _run_extraction(session_id: str, batch: list, hub: "Hub", insight_log: list[dict]) -> None:
     if not _ext_ready:
         return
     text = " ".join(s["text"] for s in batch)
@@ -174,6 +174,7 @@ async def _run_extraction(session_id: str, batch: list, hub: "Hub") -> None:
     if not data:
         return
     for ins in _map_to_insights(data, batch, session_id):
+        insight_log.append(ins)
         await hub.broadcast({"type": "insight", "insight": ins})
 
 DEFAULT_ENDPOINT = "https://staging.doings.de/stt"
@@ -223,6 +224,7 @@ async def lifespan(app: FastAPI):
     app.state.endpoint = os.getenv("DOINGS_ENDPOINT", DEFAULT_ENDPOINT)
     app.state.capture_proc = None
     app.state.past_sessions = []
+    app.state.insight_log: list[dict] = []
     # Start model load in background — server is ready immediately.
     threading.Thread(target=_load_model_bg, daemon=True).start()
     yield
@@ -358,6 +360,7 @@ async def control_start(body: StartBody | None = None) -> dict:
     if not resuming_from_paused:
         _archive_current_session(app)
         app.state.session.reset(session_id=_new_session_id())
+        app.state.insight_log = []
 
     session_id = app.state.session.session_id or _new_session_id()
     if app.state.session.session_id is None:
@@ -506,7 +509,7 @@ async def post_segment(payload: SegmentIn) -> dict:
     asyncio.create_task(_deliver_and_report(seg))
     batch = _ext_buffer.add(seg.session_id, _segment_to_dict(seg))
     if batch is not None:
-        asyncio.create_task(_run_extraction(seg.session_id, batch, app.state.hub))
+        asyncio.create_task(_run_extraction(seg.session_id, batch, app.state.hub, app.state.insight_log))
     return {"accepted": True}
 
 
@@ -520,6 +523,8 @@ async def ws_endpoint(ws: WebSocket) -> None:
         "state": s.recording_state,
         "session_id": s.session_id,
     })
+    for ins in app.state.insight_log:
+        await ws.send_json({"type": "insight", "insight": ins})
     try:
         while True:
             await ws.receive_text()
