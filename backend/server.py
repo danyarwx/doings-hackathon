@@ -6,6 +6,7 @@ import asyncio
 import os
 import shlex
 import signal
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -497,12 +498,40 @@ async def get_model() -> dict:
     return {"model": app.state.ollama_model, "allowed": list(ALLOWED_MODELS)}
 
 
+async def _prewarm_model(model: str) -> None:
+    """Force Ollama to load the model into memory with a tiny dummy chat.
+
+    Broadcasts ai_status so the UI shows loading -> ok / offline transitions.
+    Runs in the background; failures are logged but don't crash the worker.
+    """
+    await app.state.hub.broadcast({"type": "ai_status", "state": "loading", "model": model})
+    try:
+        await app.state.ollama_client.chat(
+            messages=[{"role": "user", "content": "ping"}],
+            model=model,
+            format=None,
+            temperature=0.0,
+        )
+        await app.state.hub.broadcast({"type": "ai_status", "state": "ok", "model": model})
+    except Exception as exc:  # httpx.HTTPError, timeout, etc.
+        print(f"[model] prewarm failed for {model}: {exc}", file=sys.stderr)
+        await app.state.hub.broadcast({
+            "type": "ai_status",
+            "state": "offline",
+            "model": model,
+            "error": str(exc),
+        })
+
+
 @app.post("/model")
 async def set_model(body: ModelBody) -> dict:
     if body.model not in ALLOWED_MODELS:
         raise HTTPException(status_code=400, detail=f"model must be one of {ALLOWED_MODELS}")
     app.state.ollama_model = body.model
     app.state.extractor.set_model(body.model)
+    # Kick off a background pre-warm. The UI sees `loading` immediately and
+    # transitions to `ok` (or `offline`) when the model finishes loading.
+    asyncio.create_task(_prewarm_model(body.model))
     return {"model": body.model}
 
 

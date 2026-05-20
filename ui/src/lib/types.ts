@@ -38,7 +38,7 @@ export type Insight = {
   created_at_iso: string;
 };
 
-export type AiStatus = "ok" | "no_model" | "offline" | "unknown";
+export type AiStatus = "ok" | "no_model" | "offline" | "loading" | "unknown";
 
 export type RecordingState =
   | "idle"

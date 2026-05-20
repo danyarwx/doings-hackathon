@@ -20,7 +20,7 @@ class OllamaClient:
         model: str,
         format: str | None = "json",
         temperature: float = 0.2,
-        timeout_s: float = 30.0,
+        timeout_s: float = 180.0,
     ) -> str:
         """Call POST /api/chat and return the assistant's content string."""
         payload: dict = {
@@ -38,15 +38,23 @@ class OllamaClient:
         return body["message"]["content"]
 
     async def health(self, *, model: str, timeout_s: float = 2.0) -> HealthStatus:
-        """Probe Ollama and check the named model is installed."""
+        """Probe Ollama and check the named model is installed.
+
+        Accepts both stem-only (`phi3`) and stem:tag (`qwen3:8b`) model ids.
+        Ollama stores entries with explicit tags (e.g. `qwen3:8b`, `phi3:latest`).
+        We match if either the full id matches verbatim, or the stem alone matches.
+        """
         try:
             async with httpx.AsyncClient(timeout=timeout_s) as http:
                 r = await http.get(f"{self._base}/api/tags")
             if r.status_code != 200:
                 return "offline"
-            installed = [m.get("name", "") for m in r.json().get("models", [])]
-            # Ollama stores names as "phi3:latest"; compare by stem.
-            stems = {n.split(":", 1)[0] for n in installed}
-            return "ok" if model in stems else "no_model"
+            installed = {m.get("name", "") for m in r.json().get("models", [])}
+            installed_stems = {n.split(":", 1)[0] for n in installed}
+            if ":" in model:
+                # Caller asked for an explicit tag — only an exact match counts.
+                return "ok" if model in installed else "no_model"
+            # Caller asked for a stem — any tag of that stem counts.
+            return "ok" if model in installed_stems else "no_model"
         except httpx.HTTPError:
             return "offline"

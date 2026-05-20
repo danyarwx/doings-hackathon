@@ -11,6 +11,7 @@ const STATUS_DOT: Record<AiStatus, string> = {
   ok: "bg-neon-green",
   no_model: "bg-neon-amber",
   offline: "bg-neon-pink",
+  loading: "bg-neon-cyan animate-pulse",
   unknown: "bg-white/30",
 };
 
@@ -18,6 +19,7 @@ const STATUS_LABEL: Record<AiStatus, string> = {
   ok: "AI online",
   no_model: "Model not pulled",
   offline: "AI offline",
+  loading: "Loading model…",
   unknown: "AI status unknown",
 };
 
@@ -31,7 +33,13 @@ function emptyCopy(status: AiStatus): { title: string; sub: string } {
   if (status === "no_model") {
     return {
       title: "Model not installed",
-      sub: "Run `ollama pull phi3` (or whichever model OLLAMA_MODEL points at) and try again.",
+      sub: "Run `ollama pull <model>` for the active model and try again.",
+    };
+  }
+  if (status === "loading") {
+    return {
+      title: "Loading model…",
+      sub: "Ollama is warming this model into memory. The first call after a swap can take 30–120s for larger models.",
     };
   }
   return {
