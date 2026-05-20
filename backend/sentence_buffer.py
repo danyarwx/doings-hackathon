@@ -114,6 +114,11 @@ class SentenceBuffer:
         except asyncio.QueueEmpty:
             pass
 
+    async def flush_pending(self) -> None:
+        """Public flush — call this on pause/stop so unfinished speech still
+        reaches the LLM. Idempotent; no-op when the buffer is already empty."""
+        await self._flush()
+
     def _current_duration(self) -> float:
         if not self._pending:
             return 0.0

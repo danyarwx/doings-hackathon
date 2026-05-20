@@ -86,10 +86,10 @@ class ExtractorWorker:
                 print(f"[extractor] error: {exc}", file=sys.stderr)
 
     async def _handle(self, focus: Utterance) -> None:
-        if self._state.recording_state != "recording":
-            # Still update context so a resumed session has continuity.
-            self._context.append(focus)
-            return
+        # Process any utterance that reaches us. The SentenceBuffer's reset()
+        # drains the queue on session boundaries, so stale entries don't leak.
+        # This also lets a final flush_pending() on Pause/Stop still extract
+        # from speech the user already gave us.
         if self._in_flight:
             print(
                 f"[extractor] skip-if-busy: dropping utterance ({len(focus.text)} chars)",

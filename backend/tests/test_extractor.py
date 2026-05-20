@@ -67,9 +67,13 @@ async def test_worker_processes_utterance_and_broadcasts_insight():
 
 
 @pytest.mark.asyncio
-async def test_worker_no_op_when_not_recording():
+async def test_worker_processes_utterance_even_when_not_recording():
+    # A flush_pending() on Pause/Stop can enqueue an utterance after the
+    # session has already transitioned out of "recording". The worker must
+    # still process it (otherwise the trailing speech is lost).
     state = SessionState()
     state.recording_state = "idle"
+    state.session_id = "sess-x"
     hub = StubHub()
     client = StubClient([json.dumps({"requirements": []})])
     buffer = SentenceBuffer()
@@ -78,7 +82,7 @@ async def test_worker_no_op_when_not_recording():
     try:
         await buffer.queue.put(_utt("anything."))
         await asyncio.sleep(0.05)
-        assert client.calls == []  # LLM not called
+        assert len(client.calls) == 1
     finally:
         await worker.stop()
 

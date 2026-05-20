@@ -281,6 +281,8 @@ async def control_pause() -> dict:
         proc.kill()
         await proc.wait()
     app.state.capture_proc = None
+    # Flush any pending segments so the LLM still sees the trailing speech.
+    await app.state.sentence_buffer.flush_pending()
     await app.state.hub.broadcast({
         "type": "state",
         "state": "paused",
@@ -310,6 +312,9 @@ async def control_stop() -> dict:
             proc.kill()
             await proc.wait()
     app.state.capture_proc = None
+    # Flush any pending segments so the LLM still sees the trailing speech
+    # from the just-ended session.
+    await app.state.sentence_buffer.flush_pending()
     app.state.session.recording_state = "idle"
     await app.state.hub.broadcast({
         "type": "state",
