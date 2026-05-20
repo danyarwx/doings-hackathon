@@ -23,16 +23,17 @@ export type PastSession = {
 
 export type InsightStatus = "pending" | "approved" | "declined";
 export type InsightCategory = "functional" | "non_functional";
+export type InsightCertainty = "explicit" | "implied";
 
 export type Insight = {
   id: string;
   session_id: string;
   category: InsightCategory;
+  certainty: InsightCertainty;
   text: string;
   original_text: string;
   source_quote: string;
   language: string;
-  confidence: number;
   status: InsightStatus;
   created_at_iso: string;
 };

@@ -116,7 +116,7 @@ def _insight_to_dict(ins: Insight) -> dict:
         "original_text": ins.original_text,
         "source_quote": ins.source_quote,
         "language": ins.language,
-        "confidence": ins.confidence,
+        "certainty": ins.certainty,
         "status": ins.status,
         "created_at_iso": ins.created_at_iso,
     }

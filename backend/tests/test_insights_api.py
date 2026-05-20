@@ -9,7 +9,7 @@ def _seed_insight(app_module):
         original_text="The system must handle 500 users.",
         source_quote="The system must handle 500 users.",
         language="en",
-        confidence=0.9,
+        certainty="explicit",
         status="pending",
         created_at_iso="2026-05-19T00:00:00Z",
     )
