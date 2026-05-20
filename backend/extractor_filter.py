@@ -19,7 +19,7 @@ from typing import Literal
 
 from backend.sentence_buffer import Utterance
 
-GateName = Literal["is_requirement", "length", "verb", "source_quote", "dedupe", "schema"]
+GateName = Literal["length", "verb", "source_quote", "dedupe", "schema"]
 
 
 def _env_float(name: str, default: float) -> float:
@@ -51,9 +51,9 @@ def _env_bool(name: str, default: bool) -> bool:
 
 @dataclass(frozen=True)
 class FilterConfig:
-    min_text_len: int = field(default_factory=lambda: _env_int("EXTRACTOR_MIN_TEXT_LEN", 40))
+    min_text_len: int = field(default_factory=lambda: _env_int("EXTRACTOR_MIN_TEXT_LEN", 30))
     verb_gate: bool = field(default_factory=lambda: _env_bool("EXTRACTOR_VERB_GATE", True))
-    quote_match_ratio: float = field(default_factory=lambda: _env_float("EXTRACTOR_QUOTE_MATCH_RATIO", 0.75))
+    quote_match_ratio: float = field(default_factory=lambda: _env_float("EXTRACTOR_QUOTE_MATCH_RATIO", 0.6))
     dedupe_ratio: float = field(default_factory=lambda: _env_float("EXTRACTOR_DEDUPE_RATIO", 0.85))
 
 
@@ -111,7 +111,18 @@ def _matches_focus(quote: str, focus: Utterance, ratio: float) -> bool:
         return False
     if nq in ns:
         return True
-    return SequenceMatcher(None, nq, ns).ratio() >= ratio
+    # Whole-quote fuzzy match.
+    if SequenceMatcher(None, nq, ns).ratio() >= ratio:
+        return True
+    # Small models paraphrase. Accept if any 5+-word window of the quote
+    # appears verbatim in the focus — that's enough grounding to trust it.
+    words = nq.split()
+    if len(words) >= 5:
+        for i in range(len(words) - 4):
+            chunk = " ".join(words[i : i + 5])
+            if chunk in ns:
+                return True
+    return False
 
 
 def _is_near_duplicate(text: str, existing_texts: list[str], ratio: float) -> bool:
@@ -138,30 +149,23 @@ def filter_candidates(
     dropped: list[DroppedCandidate] = []
 
     for c in candidates:
-        # Gate 1
-        if not c.get("is_requirement", False):
-            dropped.append(DroppedCandidate(
-                gate="is_requirement", reason=str(c.get("reasoning", "")), candidate=c,
-            ))
-            continue
-
         text = str(c.get("text", "")).strip()
 
-        # Gate 2: length
+        # Gate 1: length
         if len(text) < cfg.min_text_len:
             dropped.append(DroppedCandidate(
                 gate="length", reason=f"{len(text)} < {cfg.min_text_len}", candidate=c,
             ))
             continue
 
-        # Gate 3: verb
+        # Gate 2: verb
         if cfg.verb_gate and not _contains_verb(text):
             dropped.append(DroppedCandidate(
                 gate="verb", reason="no modal/intent verb", candidate=c,
             ))
             continue
 
-        # Gate 4: source_quote (always on)
+        # Gate 3: source_quote (always on)
         quote = str(c.get("source_quote", ""))
         if not _matches_focus(quote, focus, cfg.quote_match_ratio):
             dropped.append(DroppedCandidate(
@@ -169,14 +173,14 @@ def filter_candidates(
             ))
             continue
 
-        # Gate 5: fuzzy dedupe
+        # Gate 4: fuzzy dedupe
         if _is_near_duplicate(text, existing_texts, cfg.dedupe_ratio):
             dropped.append(DroppedCandidate(
                 gate="dedupe", reason="near-duplicate of existing", candidate=c,
             ))
             continue
 
-        # Gate 6: schema sanity
+        # Gate 5: schema sanity
         category = c.get("category")
         certainty = c.get("certainty")
         language = c.get("language")

@@ -24,7 +24,7 @@ DO NOT EXTRACT:
 - Implementation chatter unless it encodes a real constraint
 - Anything not present in the FOCUS utterance — CONTEXT is read-only
 
-BAD examples (every one of these MUST be rejected by setting is_requirement=false):
+BAD examples (skip these — do NOT include them in output):
 - "product requirements" — noun phrase, no verb
 - "document for the new" — fragment, incomplete clause
 - "how many?" — question, not a directive
@@ -32,34 +32,30 @@ BAD examples (every one of these MUST be rejected by setting is_requirement=fals
 - "It would be sales made." — ambiguous fragment, no clear requirement
 
 GOOD examples (these are real requirements):
-- "The dashboard must show monthly revenue." — modal verb + complete clause → explicit
-- "We need to support German language input." — intent verb + complete clause → explicit
-- "Sales reports should export to CSV." — modal verb + complete clause → explicit
+- "The dashboard must show monthly revenue." — modal + clause → explicit
+- "We need to support German language input." — intent + clause → explicit
+- "Sales reports should export to CSV." — modal + clause → explicit
 
-For each candidate, INCLUDE an `is_requirement` boolean and a one-sentence `reasoning`. If `is_requirement` is false, still include the entry so the filter can log it.
+ONLY emit entries you believe ARE requirements. Skip everything else. If nothing qualifies, return {"requirements": []}.
 
-`source_quote` MUST be the exact words copied from the FOCUS utterance — no paraphrasing.
+`source_quote` MUST be a verbatim span copied from the FOCUS utterance — no paraphrasing, no shortening. If you can't quote it exactly, skip the entry.
 
 `certainty` is "explicit" if the FOCUS utterance contains the modal/intent verb verbatim, or "implied" if you inferred the requirement using CONTEXT (e.g., resolved a pronoun).
 
-Output the requirement `text` in the same language as the FOCUS (de stays de, en stays en).
+Output the requirement `text` in the same language as the FOCUS (de stays de, en stays en). One entry per distinct requirement.
 
 SCHEMA
 {
   "requirements": [
     {
-      "is_requirement": true | false,
-      "reasoning": "<one sentence>",
-      "text": "<requirement in source language, complete clause, ≥40 chars>",
+      "text": "<requirement in source language, complete clause>",
       "category": "functional" | "non_functional",
-      "source_quote": "<exact words from FOCUS>",
+      "source_quote": "<verbatim span from FOCUS>",
       "language": "de" | "en",
       "certainty": "explicit" | "implied"
     }
   ]
 }
-
-If nothing applies, return {"requirements": []}.
 """
 
 EXISTING_TAIL = 10
