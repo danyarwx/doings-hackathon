@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from backend.delivery import deliver
 from backend.extractor import ExtractorWorker
 from backend.insights import Insight
-from backend.ollama_client import OllamaClient
+from backend.llm_router import LLMRouter, provider_of
 from backend.sentence_buffer import SentenceBuffer
 from backend.state import Segment, SessionState
 
@@ -76,12 +76,16 @@ async def lifespan(app: FastAPI):
 
     model = os.getenv("OLLAMA_MODEL", DEFAULT_MODEL)
     app.state.ollama_model = model
-    app.state.ollama_client = OllamaClient(base_url=os.getenv("OLLAMA_URL", "http://localhost:11434"))
+    app.state.llm = LLMRouter(
+        ollama_url=os.getenv("OLLAMA_URL", "http://localhost:11434"),
+        openai_key=os.getenv("OPENAI_API_KEY", ""),
+        anthropic_key=os.getenv("ANTHROPIC_API_KEY", ""),
+    )
     app.state.sentence_buffer = SentenceBuffer()
     app.state.extractor = ExtractorWorker(
         state=app.state.session,
         hub=app.state.hub,
-        client=app.state.ollama_client,
+        client=app.state.llm,
         model=model,
         buffer=app.state.sentence_buffer,
     )
@@ -462,7 +466,7 @@ async def edit_insight(ins_id: str, body: EditBody) -> dict:
 
 @app.get("/ai/status")
 async def ai_status() -> dict:
-    result = await app.state.ollama_client.health(model=app.state.ollama_model)
+    result = await app.state.llm.health(model=app.state.ollama_model)
     return {"state": result, "model": app.state.ollama_model}
 
 
@@ -485,12 +489,16 @@ async def set_vocabulary(body: VocabularyBody) -> dict:
 
 
 ALLOWED_MODELS = (
+    # Local (Ollama)
     "phi3",
     "phi4-mini:3.8b",
     "mistral",
     "llama3.1",
     "qwen2.5",
     "qwen3:8b",
+    # Cloud — require their respective API keys
+    "openai/gpt-4o-mini",
+    "anthropic/claude-haiku-4-5",
 )
 
 
@@ -511,7 +519,7 @@ async def _prewarm_model(model: str) -> None:
     """
     await app.state.hub.broadcast({"type": "ai_status", "state": "loading", "model": model})
     try:
-        await app.state.ollama_client.chat(
+        await app.state.llm.chat(
             messages=[{"role": "user", "content": "ping"}],
             model=model,
             format=None,
@@ -532,12 +540,42 @@ async def _prewarm_model(model: str) -> None:
 async def set_model(body: ModelBody) -> dict:
     if body.model not in ALLOWED_MODELS:
         raise HTTPException(status_code=400, detail=f"model must be one of {ALLOWED_MODELS}")
+    provider = provider_of(body.model)
+    if provider == "openai" and not app.state.llm.openai_set:
+        raise HTTPException(status_code=400, detail="OpenAI API key not set")
+    if provider == "anthropic" and not app.state.llm.anthropic_set:
+        raise HTTPException(status_code=400, detail="Anthropic API key not set")
     app.state.ollama_model = body.model
     app.state.extractor.set_model(body.model)
     # Kick off a background pre-warm. The UI sees `loading` immediately and
     # transitions to `ok` (or `offline`) when the model finishes loading.
     asyncio.create_task(_prewarm_model(body.model))
     return {"model": body.model}
+
+
+class ApiKeyBody(BaseModel):
+    provider: str  # "openai" | "anthropic"
+    key: str  # empty string clears
+
+
+@app.get("/api-keys")
+async def get_api_keys() -> dict:
+    # Never return the values themselves — only whether each is set.
+    return {
+        "openai": app.state.llm.openai_set,
+        "anthropic": app.state.llm.anthropic_set,
+    }
+
+
+@app.post("/api-keys")
+async def set_api_key(body: ApiKeyBody) -> dict:
+    if body.provider == "openai":
+        app.state.llm.set_openai_key(body.key)
+        return {"openai": app.state.llm.openai_set}
+    if body.provider == "anthropic":
+        app.state.llm.set_anthropic_key(body.key)
+        return {"anthropic": app.state.llm.anthropic_set}
+    raise HTTPException(status_code=400, detail="provider must be 'openai' or 'anthropic'")
 
 
 @app.websocket("/ws")

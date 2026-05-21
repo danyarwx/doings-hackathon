@@ -82,6 +82,36 @@ export async function setModel(model: string): Promise<string> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model }),
   });
-  if (!r.ok) throw new Error(`model swap failed: ${r.status}`);
+  if (!r.ok) {
+    let detail = `${r.status}`;
+    try {
+      const body = await r.json();
+      if (body?.detail) detail = body.detail;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(`model swap failed: ${detail}`);
+  }
   return (await r.json()).model;
+}
+
+export type ApiKeyStatus = { openai: boolean; anthropic: boolean };
+
+export async function getApiKeyStatus(): Promise<ApiKeyStatus> {
+  const r = await fetch("/api/api-keys");
+  if (!r.ok) throw new Error(`api-keys fetch failed: ${r.status}`);
+  return r.json();
+}
+
+export async function setApiKey(
+  provider: "openai" | "anthropic",
+  key: string,
+): Promise<ApiKeyStatus> {
+  const r = await fetch("/api/api-keys", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ provider, key }),
+  });
+  if (!r.ok) throw new Error(`api-key save failed: ${r.status}`);
+  return r.json();
 }

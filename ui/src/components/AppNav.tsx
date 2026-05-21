@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Clock, BookText, Cpu, Download, ChevronDown, Sparkles } from "lucide-react";
+import { Clock, BookText, Cpu, Download, ChevronDown, Sparkles, Cloud, KeyRound } from "lucide-react";
 import {
+  getApiKeyStatus,
   getModel,
   getVocabulary,
   listHistory,
+  setApiKey as setApiKeyApi,
   setModel as setModelApi,
   setVocabulary as setVocabularyApi,
 } from "../lib/api";
+import type { ApiKeyStatus } from "../lib/api";
 import type { PastSessionSummary } from "../lib/types";
 import { cn } from "../lib/utils";
 
@@ -15,13 +18,29 @@ type Props = {
   onSelectPast: (id: string) => void;
 };
 
-const MODELS = [
-  { id: "phi3", label: "phi3", hint: "fast (~2.4 GB)" },
-  { id: "phi4-mini:3.8b", label: "phi4-mini", hint: "newer phi, stronger (~2.5 GB)" },
-  { id: "mistral", label: "mistral", hint: "stronger German (~4 GB)" },
-  { id: "llama3.1", label: "llama3.1", hint: "best reasoning (~5 GB)" },
-  { id: "qwen3:8b", label: "qwen3 8B", hint: "newest qwen, very capable (~5.2 GB)" },
+type ModelKind = "local" | "cloud";
+type ModelEntry = {
+  id: string;
+  label: string;
+  hint: string;
+  kind: ModelKind;
+  provider?: "openai" | "anthropic";
+};
+
+const MODELS: readonly ModelEntry[] = [
+  { id: "phi3", label: "phi3", hint: "fast (~2.4 GB)", kind: "local" },
+  { id: "phi4-mini:3.8b", label: "phi4-mini", hint: "newer phi (~2.5 GB)", kind: "local" },
+  { id: "mistral", label: "mistral", hint: "stronger German (~4 GB)", kind: "local" },
+  { id: "llama3.1", label: "llama3.1", hint: "best reasoning (~5 GB)", kind: "local" },
+  { id: "qwen3:8b", label: "qwen3 8B", hint: "newest qwen, very capable (~5.2 GB)", kind: "local" },
+  { id: "openai/gpt-4o-mini", label: "gpt-4o-mini", hint: "OpenAI · fast & cheap", kind: "cloud", provider: "openai" },
+  { id: "anthropic/claude-haiku-4-5", label: "claude-haiku-4-5", hint: "Anthropic · fast", kind: "cloud", provider: "anthropic" },
 ] as const;
+
+function shortModelLabel(id: string): string {
+  const m = MODELS.find((m) => m.id === id);
+  return m ? m.label : id;
+}
 
 function fmtTime(iso: string): string {
   try {
@@ -61,13 +80,51 @@ export default function AppNav({ onSelectPast }: Props) {
   const [model, setModelState] = useState<string>("phi3");
   const [modelSaving, setModelSaving] = useState(false);
 
+  // API keys
+  const [keyStatus, setKeyStatus] = useState<ApiKeyStatus>({ openai: false, anthropic: false });
+  const [openaiDraft, setOpenaiDraft] = useState("");
+  const [anthropicDraft, setAnthropicDraft] = useState("");
+  const [keysSaving, setKeysSaving] = useState<"openai" | "anthropic" | null>(null);
+
   useEffect(() => {
     getVocabulary().then((t) => {
       setVocab(t);
       setVocabDraft(t);
     }).catch(() => {});
     getModel().then((m) => setModelState(m.model)).catch(() => {});
+    getApiKeyStatus().then(setKeyStatus).catch(() => {});
   }, []);
+
+  const handleKeySave = async (provider: "openai" | "anthropic") => {
+    if (keysSaving) return;
+    const draft = provider === "openai" ? openaiDraft : anthropicDraft;
+    setKeysSaving(provider);
+    try {
+      const next = await setApiKeyApi(provider, draft);
+      setKeyStatus(next);
+      if (provider === "openai") setOpenaiDraft("");
+      else setAnthropicDraft("");
+    } catch (err) {
+      console.error(err);
+      alert(String(err));
+    } finally {
+      setKeysSaving(null);
+    }
+  };
+
+  const handleKeyClear = async (provider: "openai" | "anthropic") => {
+    if (keysSaving) return;
+    setKeysSaving(provider);
+    try {
+      const next = await setApiKeyApi(provider, "");
+      setKeyStatus(next);
+    } catch (err) {
+      console.error(err);
+      alert(String(err));
+    } finally {
+      setKeysSaving(null);
+    }
+  };
 
   useEffect(() => {
     if (open !== "history") return;
@@ -157,8 +214,14 @@ export default function AppNav({ onSelectPast }: Props) {
           <NavButton
             active={open === "model"}
             onClick={() => setOpen(open === "model" ? null : "model")}
-            icon={<Cpu className="w-3.5 h-3.5" />}
-            label={model}
+            icon={
+              MODELS.find((m) => m.id === model)?.kind === "cloud" ? (
+                <Cloud className="w-3.5 h-3.5" />
+              ) : (
+                <Cpu className="w-3.5 h-3.5" />
+              )
+            }
+            label={shortModelLabel(model)}
             withChevron
           />
 
@@ -256,34 +319,63 @@ export default function AppNav({ onSelectPast }: Props) {
           )}
 
           {open === "model" && (
-            <Panel align="right-12">
+            <Panel align="right-12" wide>
               <div className="text-[10px] uppercase tracking-wider text-white/40 px-4 pt-3 pb-1">
-                Local Model
+                Local Model · Ollama
+              </div>
+              {MODELS.filter((m) => m.kind === "local").map((m) => (
+                <ModelRow
+                  key={m.id}
+                  entry={m}
+                  active={model === m.id}
+                  disabled={modelSaving}
+                  onPick={() => handleModelPick(m.id)}
+                />
+              ))}
+
+              <div className="text-[10px] uppercase tracking-wider text-white/40 px-4 pt-4 pb-1 border-t border-white/5 mt-1">
+                Cloud Model
+              </div>
+              {MODELS.filter((m) => m.kind === "cloud").map((m) => {
+                const keySet = m.provider ? keyStatus[m.provider] : false;
+                return (
+                  <ModelRow
+                    key={m.id}
+                    entry={m}
+                    active={model === m.id}
+                    disabled={modelSaving || !keySet}
+                    onPick={() => handleModelPick(m.id)}
+                    hintSuffix={keySet ? undefined : "API key required"}
+                  />
+                );
+              })}
+
+              <div className="text-[10px] uppercase tracking-wider text-white/40 px-4 pt-4 pb-1 border-t border-white/5 mt-1 flex items-center gap-1.5">
+                <KeyRound className="w-3 h-3" /> API Keys
               </div>
               <p className="text-[11px] text-white/40 leading-snug px-4 pb-2">
-                Active model for AI insights. Swap any time.
+                Held in memory only. Env vars OPENAI_API_KEY / ANTHROPIC_API_KEY set on startup are loaded automatically.
               </p>
-              {MODELS.map((m) => (
-                <button
-                  key={m.id}
-                  disabled={modelSaving}
-                  onClick={() => handleModelPick(m.id)}
-                  className={cn(
-                    "w-full px-4 py-2.5 text-left hover:bg-white/5 border-t border-white/5 first:border-0 flex items-center justify-between gap-3",
-                    modelSaving && "opacity-40",
-                  )}
-                >
-                  <div>
-                    <div className="text-xs text-white font-mono">{m.label}</div>
-                    <div className="text-[10px] text-white/40">{m.hint}</div>
-                  </div>
-                  {model === m.id && (
-                    <span className="text-[10px] text-neon-cyan uppercase tracking-wider">
-                      Active
-                    </span>
-                  )}
-                </button>
-              ))}
+              <KeyRow
+                label="OpenAI"
+                placeholder="sk-…"
+                draft={openaiDraft}
+                onDraft={setOpenaiDraft}
+                isSet={keyStatus.openai}
+                saving={keysSaving === "openai"}
+                onSave={() => handleKeySave("openai")}
+                onClear={() => handleKeyClear("openai")}
+              />
+              <KeyRow
+                label="Anthropic"
+                placeholder="sk-ant-…"
+                draft={anthropicDraft}
+                onDraft={setAnthropicDraft}
+                isSet={keyStatus.anthropic}
+                saving={keysSaving === "anthropic"}
+                onSave={() => handleKeySave("anthropic")}
+                onClear={() => handleKeyClear("anthropic")}
+              />
             </Panel>
           )}
         </AnimatePresence>
@@ -333,7 +425,15 @@ function NavButton({
   );
 }
 
-function Panel({ align, children }: { align: string; children: React.ReactNode }) {
+function Panel({
+  align,
+  children,
+  wide,
+}: {
+  align: string;
+  children: React.ReactNode;
+  wide?: boolean;
+}) {
   return (
     <motion.div
       initial={{ opacity: 0, y: -4 }}
@@ -341,11 +441,112 @@ function Panel({ align, children }: { align: string; children: React.ReactNode }
       exit={{ opacity: 0, y: -4 }}
       transition={{ duration: 0.15 }}
       className={cn(
-        "absolute top-full mt-1 w-80 rounded-xl border border-white/10 bg-black/85 backdrop-blur-xl shadow-[0_8px_32px_rgba(0,0,0,0.6)] overflow-hidden",
+        "absolute top-full mt-1 rounded-xl border border-white/10 bg-black/85 backdrop-blur-xl shadow-[0_8px_32px_rgba(0,0,0,0.6)] overflow-hidden",
+        wide ? "w-[22rem] max-h-[80vh] overflow-y-auto" : "w-80",
         align,
       )}
     >
       {children}
     </motion.div>
+  );
+}
+
+function ModelRow({
+  entry,
+  active,
+  disabled,
+  onPick,
+  hintSuffix,
+}: {
+  entry: ModelEntry;
+  active: boolean;
+  disabled: boolean;
+  onPick: () => void;
+  hintSuffix?: string;
+}) {
+  return (
+    <button
+      disabled={disabled}
+      onClick={onPick}
+      className={cn(
+        "w-full px-4 py-2 text-left hover:bg-white/5 border-t border-white/5 first:border-0 flex items-center justify-between gap-3",
+        disabled && "opacity-40 cursor-not-allowed",
+      )}
+    >
+      <div className="min-w-0">
+        <div className="text-xs text-white font-mono truncate">{entry.label}</div>
+        <div className="text-[10px] text-white/40 truncate">
+          {entry.hint}
+          {hintSuffix && <span className="text-neon-amber"> · {hintSuffix}</span>}
+        </div>
+      </div>
+      {active && (
+        <span className="text-[10px] text-neon-cyan uppercase tracking-wider shrink-0">
+          Active
+        </span>
+      )}
+    </button>
+  );
+}
+
+function KeyRow({
+  label,
+  placeholder,
+  draft,
+  onDraft,
+  isSet,
+  saving,
+  onSave,
+  onClear,
+}: {
+  label: string;
+  placeholder: string;
+  draft: string;
+  onDraft: (v: string) => void;
+  isSet: boolean;
+  saving: boolean;
+  onSave: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="px-4 py-2 border-t border-white/5 first:border-0">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[11px] font-medium text-white/70">{label}</span>
+        <span
+          className={cn(
+            "text-[10px] uppercase tracking-wider",
+            isSet ? "text-neon-green" : "text-white/30",
+          )}
+        >
+          {isSet ? "set" : "not set"}
+        </span>
+      </div>
+      <div className="flex gap-1.5">
+        <input
+          type="password"
+          value={draft}
+          onChange={(e) => onDraft(e.target.value)}
+          placeholder={placeholder}
+          className="flex-1 min-w-0 text-[11px] bg-black/40 border border-white/10 rounded-md px-2 py-1 text-white placeholder:text-white/25 focus:outline-none focus:border-neon-cyan/60 font-mono"
+        />
+        <button
+          onClick={onSave}
+          disabled={saving || !draft.trim()}
+          className="px-2.5 py-1 rounded-md text-[10px] font-medium text-neon-cyan bg-neon-cyan/10 border border-neon-cyan/40 hover:bg-neon-cyan/20 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {saving ? "…" : "Save"}
+        </button>
+        {isSet && (
+          <button
+            onClick={onClear}
+            disabled={saving}
+            className="px-2.5 py-1 rounded-md text-[10px] text-white/60 hover:text-white hover:bg-white/5 disabled:opacity-40"
+            title="Clear in-memory key"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
