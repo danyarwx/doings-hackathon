@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import type { AiStatus, Insight, RecordingState, Segment, WsMessage } from "./types";
+import type {
+  AiStatus,
+  ExportDraft,
+  Insight,
+  RecordingState,
+  Segment,
+  WsMessage,
+} from "./types";
 
 export type SessionView = {
   state: RecordingState;
@@ -7,6 +14,8 @@ export type SessionView = {
   segments: Segment[];
   insights: Insight[];
   aiStatus: AiStatus;
+  exportDraft: ExportDraft | null;
+  setExportDraft: (d: ExportDraft | null) => void;
 };
 
 const RECONNECT_BACKOFF_MS = [1000, 2000, 4000, 8000, 10000];
@@ -17,6 +26,7 @@ export function useSessionWs(): SessionView {
   const [segments, setSegments] = useState<Segment[]>([]);
   const [insights, setInsights] = useState<Insight[]>([]);
   const [aiStatus, setAiStatus] = useState<AiStatus>("unknown");
+  const [exportDraft, setExportDraft] = useState<ExportDraft | null>(null);
   const attemptRef = useRef(0);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -47,6 +57,7 @@ export function useSessionWs(): SessionView {
             if (msg.session_id && msg.session_id !== prevId) {
               setSegments([]);
               setInsights([]);
+              setExportDraft(null);
             }
             return msg.session_id;
           });
@@ -71,6 +82,8 @@ export function useSessionWs(): SessionView {
           );
         } else if (msg.type === "ai_status") {
           setAiStatus(msg.state);
+        } else if (msg.type === "export_draft") {
+          setExportDraft(msg.draft);
         }
         // "delivery" messages ignored in this UI.
       };
@@ -98,5 +111,5 @@ export function useSessionWs(): SessionView {
     };
   }, []);
 
-  return { state, sessionId, segments, insights, aiStatus };
+  return { state, sessionId, segments, insights, aiStatus, exportDraft, setExportDraft };
 }

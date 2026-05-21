@@ -17,7 +17,7 @@ export async function stopSession(): Promise<void> {
   if (!r.ok) throw new Error(`stop failed: ${r.status}`);
 }
 
-import type { Insight, PastSession, PastSessionSummary } from "./types";
+import type { ExportDraft, Insight, PastSession, PastSessionSummary } from "./types";
 
 export async function listHistory(): Promise<PastSessionSummary[]> {
   const r = await fetch("/api/history");
@@ -114,4 +114,41 @@ export async function setApiKey(
   });
   if (!r.ok) throw new Error(`api-key save failed: ${r.status}`);
   return r.json();
+}
+
+export type ExportStatus = {
+  ready: boolean;
+  draft: ExportDraft | null;
+  model: string;
+};
+
+export async function getExport(): Promise<ExportStatus> {
+  const r = await fetch("/api/export");
+  if (!r.ok) throw new Error(`export fetch failed: ${r.status}`);
+  return r.json();
+}
+
+export async function generateExport(): Promise<ExportDraft> {
+  const r = await fetch("/api/export/generate", { method: "POST" });
+  if (!r.ok) {
+    let detail = `${r.status}`;
+    try {
+      const body = await r.json();
+      if (body?.detail) detail = body.detail;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(`export generate failed: ${detail}`);
+  }
+  return (await r.json()).draft;
+}
+
+export async function updateExport(draft: ExportDraft): Promise<ExportDraft> {
+  const r = await fetch("/api/export", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(draft),
+  });
+  if (!r.ok) throw new Error(`export update failed: ${r.status}`);
+  return (await r.json()).draft;
 }
