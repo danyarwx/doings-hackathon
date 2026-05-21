@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shlex
 import signal
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -13,9 +15,16 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from backend.delivery import deliver
+from backend.export_prompt import build_messages as build_export_messages
+from backend.extractor import ExtractorWorker
+from backend.insights import Insight
+from backend.jira_client import JiraClient
+from backend.llm_router import LLMRouter, provider_of
+from backend.sentence_buffer import SentenceBuffer
 from backend.state import Segment, SessionState
 
 DEFAULT_ENDPOINT = "https://staging.doings.de/stt"
+DEFAULT_MODEL = "phi3"
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CAPTURE_PYTHON = REPO_ROOT / "capture" / ".venv" / "bin" / "python"
@@ -65,7 +74,35 @@ async def lifespan(app: FastAPI):
     app.state.capture_proc = None
     # In-memory list of finished sessions (PRD forbids persistence).
     app.state.past_sessions = []
+    # Whisper prompt hint set from the UI; applied on next /control/start.
+    app.state.vocabulary = ""
+
+    model = os.getenv("OLLAMA_MODEL", DEFAULT_MODEL)
+    app.state.ollama_model = model
+    app.state.llm = LLMRouter(
+        ollama_url=os.getenv("OLLAMA_URL", "http://localhost:11434"),
+        openai_key=os.getenv("OPENAI_API_KEY", ""),
+        anthropic_key=os.getenv("ANTHROPIC_API_KEY", ""),
+    )
+    app.state.jira = JiraClient(
+        base_url=os.getenv("JIRA_URL", ""),
+        email=os.getenv("JIRA_EMAIL", ""),
+        api_token=os.getenv("JIRA_API_TOKEN", ""),
+        project_key=os.getenv("JIRA_PROJECT", ""),
+    )
+    app.state.sentence_buffer = SentenceBuffer()
+    app.state.extractor = ExtractorWorker(
+        state=app.state.session,
+        hub=app.state.hub,
+        client=app.state.llm,
+        model=model,
+        buffer=app.state.sentence_buffer,
+    )
+    app.state.extractor.start()
+
     yield
+
+    await app.state.extractor.stop()
     proc = app.state.capture_proc
     if proc is not None and proc.returncode is None:
         proc.send_signal(signal.SIGINT)
@@ -87,6 +124,31 @@ def _segment_to_dict(seg: Segment) -> dict:
         "end_s": seg.end_s,
         "lang": seg.lang,
     }
+
+
+def _insight_to_dict(ins: Insight) -> dict:
+    return {
+        "id": ins.id,
+        "session_id": ins.session_id,
+        "text": ins.text,
+        "original_text": ins.original_text,
+        "source_quote": ins.source_quote,
+        "detail": ins.detail,
+        "language": ins.language,
+        "status": ins.status,
+        "created_at_iso": ins.created_at_iso,
+    }
+
+
+def _find_insight(app: FastAPI, ins_id: str) -> tuple[int, Insight] | None:
+    for i, ins in enumerate(app.state.session.insights):
+        if ins.id == ins_id:
+            return i, ins
+    return None
+
+
+def _replace_insight(app: FastAPI, idx: int, new: Insight) -> None:
+    app.state.session.insights[idx] = new
 
 
 async def _deliver_and_report(seg: Segment) -> None:
@@ -113,11 +175,13 @@ async def _deliver_and_report(seg: Segment) -> None:
     })
 
 
-def _capture_command(language: str | None = None) -> list[str]:
+def _capture_command(language: str | None = None, vocabulary: str | None = None) -> list[str]:
     cmd_str = os.getenv("CAPTURE_CMD", DEFAULT_CAPTURE_CMD)
     parts = shlex.split(cmd_str)
     if language and "--language" not in parts:
         parts += ["--language", language]
+    if vocabulary and vocabulary.strip() and "--prompt" not in parts:
+        parts += ["--prompt", vocabulary.strip()]
     return parts
 
 
@@ -191,12 +255,13 @@ async def control_start(body: StartBody | None = None) -> dict:
         _archive_current_session(app)
         # Fresh session: clear segments + delivery state, mint a new id.
         app.state.session.reset(session_id=_new_session_id())
+        app.state.sentence_buffer.reset()
 
     session_id = app.state.session.session_id or _new_session_id()
     if app.state.session.session_id is None:
         app.state.session.session_id = session_id
 
-    cmd = _capture_command(language=language)
+    cmd = _capture_command(language=language, vocabulary=app.state.vocabulary)
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.DEVNULL,
@@ -228,6 +293,8 @@ async def control_pause() -> dict:
         proc.kill()
         await proc.wait()
     app.state.capture_proc = None
+    # Flush any pending segments so the LLM still sees the trailing speech.
+    await app.state.sentence_buffer.flush_pending()
     await app.state.hub.broadcast({
         "type": "state",
         "state": "paused",
@@ -257,6 +324,9 @@ async def control_stop() -> dict:
             proc.kill()
             await proc.wait()
     app.state.capture_proc = None
+    # Flush any pending segments so the LLM still sees the trailing speech
+    # from the just-ended session.
+    await app.state.sentence_buffer.flush_pending()
     app.state.session.recording_state = "idle"
     await app.state.hub.broadcast({
         "type": "state",
@@ -330,9 +400,364 @@ async def post_segment(payload: SegmentIn) -> dict:
         lang=payload.lang,
     )
     app.state.session.add_segment(seg)
+    await app.state.sentence_buffer.add(seg)
     await app.state.hub.broadcast({"type": "segment", "segment": _segment_to_dict(seg)})
     asyncio.create_task(_deliver_and_report(seg))
     return {"accepted": True}
+
+
+class EditBody(BaseModel):
+    text: str
+
+
+@app.get("/insights")
+async def list_insights() -> dict:
+    return {"insights": [_insight_to_dict(i) for i in app.state.session.insights]}
+
+
+@app.post("/insights/{ins_id}/approve")
+async def approve_insight(ins_id: str) -> dict:
+    found = _find_insight(app, ins_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="insight not found")
+    idx, ins = found
+    from dataclasses import replace
+    new = replace(ins, status="approved")
+    _replace_insight(app, idx, new)
+    await app.state.hub.broadcast({
+        "type": "insight_update",
+        "id": new.id,
+        "status": new.status,
+        "text": new.text,
+    })
+    return {"insight": _insight_to_dict(new)}
+
+
+@app.post("/insights/{ins_id}/decline")
+async def decline_insight(ins_id: str) -> dict:
+    found = _find_insight(app, ins_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="insight not found")
+    idx, ins = found
+    from dataclasses import replace
+    new = replace(ins, status="declined")
+    _replace_insight(app, idx, new)
+    await app.state.hub.broadcast({
+        "type": "insight_update",
+        "id": new.id,
+        "status": new.status,
+        "text": new.text,
+    })
+    return {"insight": _insight_to_dict(new)}
+
+
+@app.post("/insights/{ins_id}/edit")
+async def edit_insight(ins_id: str, body: EditBody) -> dict:
+    found = _find_insight(app, ins_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="insight not found")
+    idx, ins = found
+    new_text = body.text.strip()
+    if not new_text or len(new_text) > 500:
+        raise HTTPException(status_code=400, detail="text must be 1..500 chars")
+    from dataclasses import replace
+    new = replace(ins, text=new_text, status="pending")
+    _replace_insight(app, idx, new)
+    await app.state.hub.broadcast({
+        "type": "insight_update",
+        "id": new.id,
+        "status": new.status,
+        "text": new.text,
+    })
+    return {"insight": _insight_to_dict(new)}
+
+
+@app.get("/ai/status")
+async def ai_status() -> dict:
+    result = await app.state.llm.health(model=app.state.ollama_model)
+    return {"state": result, "model": app.state.ollama_model}
+
+
+def _export_ready(s: SessionState) -> bool:
+    """Export pass needs an idle, non-empty session with approved insights."""
+    if s.recording_state != "idle":
+        return False
+    return any(i.status == "approved" for i in s.insights)
+
+
+@app.get("/export")
+async def get_export() -> dict:
+    s: SessionState = app.state.session
+    return {
+        "ready": _export_ready(s),
+        "draft": s.export_draft,
+        "model": app.state.ollama_model,
+    }
+
+
+class ExportDraftBody(BaseModel):
+    requirements: list
+    decisions: list
+
+
+@app.put("/export")
+async def update_export(body: ExportDraftBody) -> dict:
+    """Replace the in-memory export draft with the (edited) version from the UI."""
+    s: SessionState = app.state.session
+    s.export_draft = {"requirements": body.requirements, "decisions": body.decisions}
+    return {"draft": s.export_draft}
+
+
+@app.delete("/export")
+async def clear_export() -> dict:
+    app.state.session.export_draft = None
+    return {"draft": None}
+
+
+@app.post("/export/generate")
+async def generate_export() -> dict:
+    s: SessionState = app.state.session
+    if not _export_ready(s):
+        raise HTTPException(
+            status_code=409,
+            detail="export requires an idle session with at least one approved insight",
+        )
+
+    approved = [i for i in s.insights if i.status == "approved"]
+    messages = build_export_messages(approved=approved, segments=s.segments)
+
+    await app.state.hub.broadcast({
+        "type": "ai_status",
+        "state": "thinking",
+        "model": app.state.ollama_model,
+    })
+    try:
+        raw = await app.state.llm.chat(
+            messages=messages,
+            model=app.state.ollama_model,
+        )
+    except Exception as exc:
+        print(f"[export] LLM call failed: {exc}", file=sys.stderr)
+        await app.state.hub.broadcast({
+            "type": "ai_status",
+            "state": "offline",
+            "model": app.state.ollama_model,
+            "error": str(exc),
+        })
+        raise HTTPException(status_code=502, detail=f"LLM call failed: {exc}")
+
+    await app.state.hub.broadcast({
+        "type": "ai_status",
+        "state": "ok",
+        "model": app.state.ollama_model,
+    })
+
+    try:
+        draft = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        print(f"[export] non-json reply: {exc}; raw={raw[:300]!r}", file=sys.stderr)
+        raise HTTPException(status_code=502, detail="LLM returned non-JSON output")
+
+    # Normalize shape — always present both arrays even if missing.
+    if not isinstance(draft, dict):
+        raise HTTPException(status_code=502, detail="LLM output was not a JSON object")
+    draft.setdefault("requirements", [])
+    draft.setdefault("decisions", [])
+    if not isinstance(draft["requirements"], list):
+        draft["requirements"] = []
+    if not isinstance(draft["decisions"], list):
+        draft["decisions"] = []
+
+    s.export_draft = draft
+    await app.state.hub.broadcast({"type": "export_draft", "draft": draft})
+    return {"draft": draft}
+
+
+# ----- Jira config + push ------------------------------------------------
+
+class JiraConfigBody(BaseModel):
+    field: str  # "url" | "email" | "token" | "project"
+    value: str  # empty string clears
+
+
+@app.get("/jira/config")
+async def get_jira_config() -> dict:
+    j: JiraClient = app.state.jira
+    return {
+        "url_set": j.url_set,
+        "email_set": j.email_set,
+        "token_set": j.token_set,
+        "project_set": j.project_set,
+        "url": j.base_url if j.url_set else "",
+        "project": j.project if j.project_set else "",
+    }
+
+
+@app.post("/jira/config")
+async def set_jira_config(body: JiraConfigBody) -> dict:
+    j: JiraClient = app.state.jira
+    if body.field == "url":
+        j.set_url(body.value)
+    elif body.field == "email":
+        j.set_email(body.value)
+    elif body.field == "token":
+        j.set_token(body.value)
+    elif body.field == "project":
+        j.set_project(body.value)
+    else:
+        raise HTTPException(status_code=400, detail="field must be url/email/token/project")
+    return await get_jira_config()
+
+
+class PushBody(BaseModel):
+    index: int  # which requirement in the current export draft
+
+
+@app.post("/export/push")
+async def push_one(body: PushBody) -> dict:
+    j: JiraClient = app.state.jira
+    if not j.fully_configured:
+        raise HTTPException(status_code=400, detail="Jira is not fully configured")
+    draft = app.state.session.export_draft
+    if not draft or body.index < 0 or body.index >= len(draft.get("requirements", [])):
+        raise HTTPException(status_code=404, detail="requirement not found at that index")
+    requirement = draft["requirements"][body.index]
+    decisions = draft.get("decisions", [])
+    try:
+        result = await j.create_issue(requirement=requirement, decisions=decisions)
+    except RuntimeError as exc:
+        print(f"[jira] push failed: {exc}", file=sys.stderr)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return result
+
+
+@app.post("/export/push-all")
+async def push_all() -> dict:
+    j: JiraClient = app.state.jira
+    if not j.fully_configured:
+        raise HTTPException(status_code=400, detail="Jira is not fully configured")
+    draft = app.state.session.export_draft
+    if not draft:
+        raise HTTPException(status_code=404, detail="no export draft to push")
+    decisions = draft.get("decisions", [])
+    results: list[dict] = []
+    for i, req in enumerate(draft.get("requirements", [])):
+        summary = req.get("summary", "")
+        try:
+            r = await j.create_issue(requirement=req, decisions=decisions)
+            results.append({"index": i, "summary": summary, "key": r["key"], "url": r["url"]})
+        except RuntimeError as exc:
+            print(f"[jira] push {i} failed: {exc}", file=sys.stderr)
+            results.append({"index": i, "summary": summary, "error": str(exc)})
+    return {"results": results}
+
+
+class VocabularyBody(BaseModel):
+    text: str
+
+
+@app.get("/vocabulary")
+async def get_vocabulary() -> dict:
+    return {"text": app.state.vocabulary}
+
+
+@app.post("/vocabulary")
+async def set_vocabulary(body: VocabularyBody) -> dict:
+    text = body.text.strip()
+    if len(text) > 2000:
+        raise HTTPException(status_code=400, detail="vocabulary must be <= 2000 chars")
+    app.state.vocabulary = text
+    return {"text": text}
+
+
+ALLOWED_MODELS = (
+    # Local (Ollama)
+    "phi3",
+    "phi4-mini:3.8b",
+    "mistral",
+    "llama3.1",
+    "qwen2.5",
+    "qwen3:8b",
+    # Cloud — require their respective API keys
+    "openai/gpt-4o-mini",
+    "anthropic/claude-haiku-4-5",
+)
+
+
+class ModelBody(BaseModel):
+    model: str
+
+
+@app.get("/model")
+async def get_model() -> dict:
+    return {"model": app.state.ollama_model, "allowed": list(ALLOWED_MODELS)}
+
+
+async def _prewarm_model(model: str) -> None:
+    """Force Ollama to load the model into memory with a tiny dummy chat.
+
+    Broadcasts ai_status so the UI shows loading -> ok / offline transitions.
+    Runs in the background; failures are logged but don't crash the worker.
+    """
+    await app.state.hub.broadcast({"type": "ai_status", "state": "loading", "model": model})
+    try:
+        await app.state.llm.chat(
+            messages=[{"role": "user", "content": "ping"}],
+            model=model,
+            format=None,
+            temperature=0.0,
+        )
+        await app.state.hub.broadcast({"type": "ai_status", "state": "ok", "model": model})
+    except Exception as exc:  # httpx.HTTPError, timeout, etc.
+        print(f"[model] prewarm failed for {model}: {exc}", file=sys.stderr)
+        await app.state.hub.broadcast({
+            "type": "ai_status",
+            "state": "offline",
+            "model": model,
+            "error": str(exc),
+        })
+
+
+@app.post("/model")
+async def set_model(body: ModelBody) -> dict:
+    if body.model not in ALLOWED_MODELS:
+        raise HTTPException(status_code=400, detail=f"model must be one of {ALLOWED_MODELS}")
+    provider = provider_of(body.model)
+    if provider == "openai" and not app.state.llm.openai_set:
+        raise HTTPException(status_code=400, detail="OpenAI API key not set")
+    if provider == "anthropic" and not app.state.llm.anthropic_set:
+        raise HTTPException(status_code=400, detail="Anthropic API key not set")
+    app.state.ollama_model = body.model
+    app.state.extractor.set_model(body.model)
+    # Kick off a background pre-warm. The UI sees `loading` immediately and
+    # transitions to `ok` (or `offline`) when the model finishes loading.
+    asyncio.create_task(_prewarm_model(body.model))
+    return {"model": body.model}
+
+
+class ApiKeyBody(BaseModel):
+    provider: str  # "openai" | "anthropic"
+    key: str  # empty string clears
+
+
+@app.get("/api-keys")
+async def get_api_keys() -> dict:
+    # Never return the values themselves — only whether each is set.
+    return {
+        "openai": app.state.llm.openai_set,
+        "anthropic": app.state.llm.anthropic_set,
+    }
+
+
+@app.post("/api-keys")
+async def set_api_key(body: ApiKeyBody) -> dict:
+    if body.provider == "openai":
+        app.state.llm.set_openai_key(body.key)
+        return {"openai": app.state.llm.openai_set}
+    if body.provider == "anthropic":
+        app.state.llm.set_anthropic_key(body.key)
+        return {"anthropic": app.state.llm.anthropic_set}
+    raise HTTPException(status_code=400, detail="provider must be 'openai' or 'anthropic'")
 
 
 @app.websocket("/ws")
@@ -345,6 +770,9 @@ async def ws_endpoint(ws: WebSocket) -> None:
         "state": s.recording_state,
         "session_id": s.session_id,
     })
+    # Also send a snapshot of any existing insights, so a late client catches up.
+    for ins in s.insights:
+        await ws.send_json({"type": "insight", "insight": _insight_to_dict(ins)})
     try:
         while True:
             await ws.receive_text()

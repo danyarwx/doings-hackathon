@@ -1,20 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import type { Segment } from "../lib/types";
 import GlassCard from "./GlassCard";
-import HistoryMenu from "./HistoryMenu";
 import SegmentCard from "./SegmentCard";
 
 type Props = {
   segments: Segment[];
   viewingPastId?: string | null;
-  onViewPast?: (id: string) => void;
   onBackToLive?: () => void;
 };
 
 export default function TranscriptPanel({
   segments,
   viewingPastId,
-  onViewPast,
   onBackToLive,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -55,7 +52,6 @@ export default function TranscriptPanel({
               ← Back to live
             </button>
           )}
-          {!isPast && onViewPast && <HistoryMenu onSelect={onViewPast} />}
         </div>
       </div>
       <div

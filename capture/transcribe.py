@@ -90,11 +90,20 @@ class Transcriber:
         if self._gain_target_dbfs is not None:
             audio = normalize_rms(audio, self._gain_target_dbfs)
 
-        params: dict = {}
+        params: dict = {
+            # whisper.cpp defaults `language` to "en", which means an English
+            # decoder is run against any audio when the caller hasn't forced
+            # a language. That makes German speech come out as English text
+            # (a translation-like effect). "auto" makes whisper detect the
+            # spoken language per chunk and decode in that language.
+            "language": self._forced_language or "auto",
+            # Hard-disable translation. whisper.cpp defaults this to False
+            # already; setting it explicitly guards against any path that
+            # might flip it on.
+            "translate": False,
+        }
         if self._initial_prompt:
             params["initial_prompt"] = self._initial_prompt
-        if self._forced_language:
-            params["language"] = self._forced_language
 
         raw_segments = self._model.transcribe(audio, **params)
 

@@ -13,4 +13,8 @@ def stop_process(process: subprocess.Popen):
         try:
             os.kill(process.pid, signal.SIGINT)
         except ProcessLookupError:
+<<<<<<< HEAD
             pass
+=======
+            pass
+>>>>>>> step-1-terminal-stt

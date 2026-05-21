@@ -5,4 +5,8 @@ if sys.platform == "win32":
 else:
     from .hardware_mac import check_hardware_warnings
 
+<<<<<<< HEAD
 __all__ = ["check_hardware_warnings"]
+=======
+__all__ = ["check_hardware_warnings"]
+>>>>>>> step-1-terminal-stt
