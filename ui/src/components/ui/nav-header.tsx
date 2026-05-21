@@ -23,7 +23,7 @@ export function NavHeader({ children }: { children: React.ReactNode }) {
 
   return (
     <ul
-      className="relative flex w-fit rounded-full border border-white/10 bg-black/40 backdrop-blur-md p-1"
+      className="relative flex w-fit rounded-full border border-white/10 bg-transparent p-1"
       onMouseLeave={() => setPosition((pv) => ({ ...pv, opacity: 0 }))}
     >
       {React.Children.map(children, (child) => {
