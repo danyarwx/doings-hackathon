@@ -77,7 +77,6 @@ def _normalize(s: str) -> str:
     return _PUNCT.sub("", s.lower()).strip()
 
 
-_VALID_CATEGORY = {"functional", "non_functional"}
 
 # Word-boundary, case-insensitive. Multi-word forms ("needs to", "has to") use
 # explicit spacing; single tokens use \b boundaries.
@@ -189,11 +188,9 @@ def filter_candidates(
             continue
 
         # Gate 5: schema sanity
-        category = c.get("category")
         language = c.get("language")
         if (
-            category not in _VALID_CATEGORY
-            or not isinstance(language, str)
+            not isinstance(language, str)
             or len(language) != 2
             or len(text) > 500
         ):

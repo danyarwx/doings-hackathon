@@ -4,7 +4,6 @@ def _seed_insight(app_module):
     ins = Insight(
         id="ins-001",
         session_id="sess-seed",
-        category="functional",
         text="The system must handle 500 users.",
         original_text="The system must handle 500 users.",
         source_quote="The system must handle 500 users.",

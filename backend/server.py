@@ -121,7 +121,6 @@ def _insight_to_dict(ins: Insight) -> dict:
     return {
         "id": ins.id,
         "session_id": ins.session_id,
-        "category": ins.category,
         "text": ins.text,
         "original_text": ins.original_text,
         "source_quote": ins.source_quote,

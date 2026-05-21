@@ -51,7 +51,6 @@ def test_reset_clears_insights_too():
     ins = Insight(
         id="ins-001",
         session_id="s1",
-        category="functional",
         text="x",
         original_text="x",
         source_quote="x",

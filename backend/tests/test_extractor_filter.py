@@ -18,7 +18,6 @@ CFG = FilterConfig()
 def _cand(**overrides) -> dict:
     base = {
         "text": GOOD_TEXT,
-        "category": "functional",
         "source_quote": GOOD_QUOTE,
         "language": "en",
     }
@@ -140,15 +139,15 @@ def test_fuzzy_dedupe_threshold_tunable():
     assert len(out.kept) == 1
 
 
-def test_schema_invalid_category_drops():
-    out = filter_candidates([_cand(category="ux")], focus=FOCUS, existing_texts=[], cfg=CFG)
+def test_schema_invalid_language_drops():
+    out = filter_candidates([_cand(language="english")], focus=FOCUS, existing_texts=[], cfg=CFG)
     assert out.dropped[0].gate == "schema"
 
 
 def test_survivor_passes_through_known_fields():
     out = filter_candidates([_cand()], focus=FOCUS, existing_texts=[], cfg=CFG)
-    assert out.kept[0]["category"] == "functional"
     assert out.kept[0]["language"] == "en"
+    assert out.kept[0]["text"] == GOOD_TEXT
 
 
 def test_paraphrased_quote_with_5word_overlap_passes():

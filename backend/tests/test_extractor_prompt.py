@@ -11,14 +11,16 @@ def test_system_prompt_mentions_few_shot():
     assert "product requirements" in SYSTEM_PROMPT
     assert "must show monthly revenue" in SYSTEM_PROMPT
     # Schema fields the model is expected to emit
-    assert "category" in SYSTEM_PROMPT
     assert "source_quote" in SYSTEM_PROMPT
     assert "detail" in SYSTEM_PROMPT
 
 
-def test_system_prompt_does_not_mention_certainty():
-    assert "certainty" not in SYSTEM_PROMPT.lower()
-    assert "explicit" not in SYSTEM_PROMPT.lower()
+def test_system_prompt_does_not_mention_removed_fields():
+    body = SYSTEM_PROMPT.lower()
+    assert "certainty" not in body
+    assert "explicit" not in body
+    assert "category" not in body
+    assert "functional" not in body
 
 
 def test_system_prompt_does_not_mention_confidence():

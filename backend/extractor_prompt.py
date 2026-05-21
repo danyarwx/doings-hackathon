@@ -49,7 +49,6 @@ SCHEMA
   "requirements": [
     {
       "text": "<requirement in source language, complete clause>",
-      "category": "functional" | "non_functional",
       "source_quote": "<verbatim span from FOCUS>",
       "detail": "<one short sentence of grounded context, or empty string>",
       "language": "de" | "en"

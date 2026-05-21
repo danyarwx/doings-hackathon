@@ -5,7 +5,6 @@ def test_insight_minimal_fields():
     ins = Insight(
         id="ins-001",
         session_id="sess-x",
-        category="functional",
         text="The system must handle 500 concurrent users.",
         original_text="The system must handle 500 concurrent users.",
         source_quote="The system must handle 500 concurrent users.",
@@ -15,14 +14,13 @@ def test_insight_minimal_fields():
         created_at_iso="2026-05-19T00:00:00Z",
     )
     assert ins.status == "pending"
-    assert ins.category == "functional"
+    assert ins.text.startswith("The system must")
 
 
 def test_insight_is_frozen():
     ins = Insight(
         id="ins-001",
         session_id="sess-x",
-        category="functional",
         text="x",
         original_text="x",
         source_quote="x",

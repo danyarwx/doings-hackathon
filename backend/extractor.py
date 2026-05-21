@@ -174,7 +174,6 @@ class ExtractorWorker:
                 ins = Insight(
                     id=f"ins-{self._counter:03d}",
                     session_id=self._state.session_id or "sess-unknown",
-                    category=cand["category"],
                     text=cand["text"],
                     original_text=cand["text"],
                     source_quote=str(cand.get("source_quote", "")),
@@ -200,7 +199,6 @@ def _insight_to_dict(ins: Insight) -> dict:
     return {
         "id": ins.id,
         "session_id": ins.session_id,
-        "category": ins.category,
         "text": ins.text,
         "original_text": ins.original_text,
         "source_quote": ins.source_quote,
