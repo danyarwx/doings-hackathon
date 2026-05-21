@@ -37,6 +37,35 @@ export type Insight = {
 
 export type AiStatus = "ok" | "no_model" | "offline" | "loading" | "thinking" | "unknown";
 
+export type InvestValidation = {
+  independent: boolean;
+  negotiable: boolean;
+  valuable: boolean;
+  estimable: boolean;
+  small: boolean;
+  testable: boolean;
+};
+
+export type ExportRequirement = {
+  issuetype: "Story" | "Task" | "Bug" | "Epic";
+  summary: string;
+  description: {
+    user_story: { given: string; when: string; then: string };
+    acceptance_criteria: string[];
+    invest_validation: InvestValidation;
+  };
+  priority: "high" | "medium" | "low";
+  labels: string[];
+  story_points: number | null;
+};
+
+export type ExportDecision = { summary: string };
+
+export type ExportDraft = {
+  requirements: ExportRequirement[];
+  decisions: ExportDecision[];
+};
+
 export type RecordingState =
   | "idle"
   | "recording"
@@ -50,4 +79,5 @@ export type WsMessage =
   | { type: "delivery"; id: string; status: string; attempts: number }
   | { type: "insight"; insight: Insight }
   | { type: "insight_update"; id: string; status: InsightStatus; text: string }
-  | { type: "ai_status"; state: Exclude<AiStatus, "unknown">; model: string; error?: string };
+  | { type: "ai_status"; state: Exclude<AiStatus, "unknown">; model: string; error?: string }
+  | { type: "export_draft"; draft: ExportDraft };

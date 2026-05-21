@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shlex
 import signal
@@ -14,6 +15,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from backend.delivery import deliver
+from backend.export_prompt import build_messages as build_export_messages
 from backend.extractor import ExtractorWorker
 from backend.insights import Insight
 from backend.llm_router import LLMRouter, provider_of
@@ -467,6 +469,82 @@ async def edit_insight(ins_id: str, body: EditBody) -> dict:
 async def ai_status() -> dict:
     result = await app.state.llm.health(model=app.state.ollama_model)
     return {"state": result, "model": app.state.ollama_model}
+
+
+def _export_ready(s: SessionState) -> bool:
+    """Export pass needs an idle, non-empty session with approved insights."""
+    if s.recording_state != "idle":
+        return False
+    return any(i.status == "approved" for i in s.insights)
+
+
+@app.get("/export")
+async def get_export() -> dict:
+    s: SessionState = app.state.session
+    return {
+        "ready": _export_ready(s),
+        "draft": s.export_draft,
+        "model": app.state.ollama_model,
+    }
+
+
+@app.post("/export/generate")
+async def generate_export() -> dict:
+    s: SessionState = app.state.session
+    if not _export_ready(s):
+        raise HTTPException(
+            status_code=409,
+            detail="export requires an idle session with at least one approved insight",
+        )
+
+    approved = [i for i in s.insights if i.status == "approved"]
+    messages = build_export_messages(approved=approved, segments=s.segments)
+
+    await app.state.hub.broadcast({
+        "type": "ai_status",
+        "state": "thinking",
+        "model": app.state.ollama_model,
+    })
+    try:
+        raw = await app.state.llm.chat(
+            messages=messages,
+            model=app.state.ollama_model,
+        )
+    except Exception as exc:
+        print(f"[export] LLM call failed: {exc}", file=sys.stderr)
+        await app.state.hub.broadcast({
+            "type": "ai_status",
+            "state": "offline",
+            "model": app.state.ollama_model,
+            "error": str(exc),
+        })
+        raise HTTPException(status_code=502, detail=f"LLM call failed: {exc}")
+
+    await app.state.hub.broadcast({
+        "type": "ai_status",
+        "state": "ok",
+        "model": app.state.ollama_model,
+    })
+
+    try:
+        draft = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        print(f"[export] non-json reply: {exc}; raw={raw[:300]!r}", file=sys.stderr)
+        raise HTTPException(status_code=502, detail="LLM returned non-JSON output")
+
+    # Normalize shape — always present both arrays even if missing.
+    if not isinstance(draft, dict):
+        raise HTTPException(status_code=502, detail="LLM output was not a JSON object")
+    draft.setdefault("requirements", [])
+    draft.setdefault("decisions", [])
+    if not isinstance(draft["requirements"], list):
+        draft["requirements"] = []
+    if not isinstance(draft["decisions"], list):
+        draft["decisions"] = []
+
+    s.export_draft = draft
+    await app.state.hub.broadcast({"type": "export_draft", "draft": draft})
+    return {"draft": draft}
 
 
 class VocabularyBody(BaseModel):

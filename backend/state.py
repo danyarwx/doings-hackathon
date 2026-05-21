@@ -35,6 +35,10 @@ class SessionState:
     segments: list[Segment] = field(default_factory=list)
     deliveries: dict[str, DeliveryStatus] = field(default_factory=dict)
     insights: list[Insight] = field(default_factory=list)
+    # Step-4 export: dict shape {"requirements": [...], "decisions": [...]}
+    # produced by POST /export/generate. None until generated; cleared on the
+    # next /control/start.
+    export_draft: dict | None = None
 
     def add_segment(self, seg: Segment) -> None:
         self.segments.append(seg)
@@ -52,5 +56,6 @@ class SessionState:
         self.segments = []
         self.deliveries = {}
         self.insights = []
+        self.export_draft = None
         self.session_id = session_id
         self.recording_state = "idle"

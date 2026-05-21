@@ -17,6 +17,10 @@ import { cn } from "../lib/utils";
 
 type Props = {
   onSelectPast: (id: string) => void;
+  onOpenExport: () => void;
+  exportReady: boolean;
+  exportOpen: boolean;
+  onModelChange?: (model: string) => void;
 };
 
 type ModelKind = "local" | "cloud";
@@ -64,7 +68,13 @@ function fmtDuration(s: number): string {
   return `${m}m ${rem}s`;
 }
 
-export default function AppNav({ onSelectPast }: Props) {
+export default function AppNav({
+  onSelectPast,
+  onOpenExport,
+  exportReady,
+  exportOpen,
+  onModelChange,
+}: Props) {
   const [open, setOpen] = useState<null | "history" | "vocab" | "model">(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -92,9 +102,12 @@ export default function AppNav({ onSelectPast }: Props) {
       setVocab(t);
       setVocabDraft(t);
     }).catch(() => {});
-    getModel().then((m) => setModelState(m.model)).catch(() => {});
+    getModel().then((m) => {
+      setModelState(m.model);
+      onModelChange?.(m.model);
+    }).catch(() => {});
     getApiKeyStatus().then(setKeyStatus).catch(() => {});
-  }, []);
+  }, [onModelChange]);
 
   const handleKeySave = async (provider: "openai" | "anthropic") => {
     if (keysSaving) return;
@@ -166,6 +179,7 @@ export default function AppNav({ onSelectPast }: Props) {
     try {
       const next = await setModelApi(id);
       setModelState(next);
+      onModelChange?.(next);
       setOpen(null);
     } catch (err) {
       console.error(err);
@@ -227,12 +241,23 @@ export default function AppNav({ onSelectPast }: Props) {
             <span>{shortModelLabel(model)}</span>
           </NavTab>
 
-          <NavTab disabled title="Available in Step 4">
+          <NavTab
+            active={exportOpen}
+            disabled={!exportReady}
+            onClick={onOpenExport}
+            title={
+              exportReady
+                ? "Generate post-meeting export"
+                : "Stop the session and approve at least one insight first"
+            }
+          >
             <Download className="w-3.5 h-3.5" />
             <span>Export</span>
-            <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] tracking-wider bg-white/10 text-white/40">
-              soon
-            </span>
+            {!exportReady && (
+              <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] tracking-wider bg-white/10 text-white/40">
+                idle
+              </span>
+            )}
           </NavTab>
         </NavHeader>
 
