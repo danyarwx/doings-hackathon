@@ -239,8 +239,8 @@ export default function ExportView({
 
   return (
     <GlassCard className="flex flex-col h-full overflow-hidden">
-      <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
+      <div className="px-5 py-4 border-b border-white/10 flex items-center gap-3">
+        <div className="flex-1 flex items-center gap-3 min-w-0">
           <button
             onClick={onBack}
             className="flex items-center gap-1 text-[11px] text-white/60 hover:text-white uppercase tracking-wider"
@@ -251,48 +251,51 @@ export default function ExportView({
             Export
           </h2>
           {local && (
-            <span className="text-[10px] text-white/40 uppercase tracking-wider">
+            <span className="text-[10px] text-white/40 uppercase tracking-wider truncate">
               {local.requirements.length} requirements · {local.decisions.length} decisions
             </span>
           )}
           <SaveIndicator state={saveState} />
         </div>
-        <div className="flex items-center gap-2">
-          {local && local.requirements.length > 0 && (
+        {local && (
+          <div className="flex items-center gap-3">
+            {local.requirements.length > 0 && (
+              <GlassButton
+                size="default"
+                tone="blue"
+                onClick={handlePushAll}
+                disabled={!jiraReady || pushingAll || pushingIdx !== null}
+                title={jiraReady ? "Push every requirement to Jira" : "Configure Jira below first"}
+              >
+                <Upload className="w-4 h-4" />
+                {pushingAll ? "Pushing…" : "Push all to Jira"}
+              </GlassButton>
+            )}
+            {downloadUrl && (
+              <a
+                href={downloadUrl}
+                download={`doings-export-${Date.now()}.json`}
+                className={glassButtonVariants({ size: "default", tone: "neutral" })}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <Download className="w-4 h-4" /> Download JSON
+                </span>
+              </a>
+            )}
             <GlassButton
-              size="sm"
-              tone="blue"
-              onClick={handlePushAll}
-              disabled={!jiraReady || pushingAll || pushingIdx !== null}
-              title={jiraReady ? "Push every requirement to Jira" : "Configure Jira below first"}
-            >
-              <Upload className="w-3.5 h-3.5" />
-              {pushingAll ? "Pushing…" : "Push all to Jira"}
-            </GlassButton>
-          )}
-          {local && downloadUrl && (
-            <a
-              href={downloadUrl}
-              download={`doings-export-${Date.now()}.json`}
-              className={glassButtonVariants({ size: "sm", tone: "neutral" })}
-            >
-              <span className="inline-flex items-center gap-2">
-                <Download className="w-3.5 h-3.5" /> Download JSON
-              </span>
-            </a>
-          )}
-          {local && (
-            <GlassButton
-              size="sm"
+              size="default"
               tone="cyan"
               onClick={onGenerate}
               disabled={generating}
             >
-              <Sparkles className="w-3.5 h-3.5" />
+              <Sparkles className="w-4 h-4" />
               {generating ? "Generating…" : "Regenerate"}
             </GlassButton>
-          )}
-        </div>
+          </div>
+        )}
+        {/* Right-side spacer matches the left-side flex-1 so the buttons
+            sit on the true center of the header. */}
+        <div className="flex-1" />
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4">
