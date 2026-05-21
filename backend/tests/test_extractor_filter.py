@@ -84,6 +84,32 @@ def test_verb_gate_accepts_german_modal():
     assert len(out.kept) == 1
 
 
+def test_verb_gate_accepts_plural_muessen():
+    # The original German verb list only had "muss"; "wir müssen …" was
+    # dropped by the verb gate even though it's a perfectly valid requirement.
+    text = "Wir müssen die API Endpunkte bis Freitag bereitstellen."
+    de_focus = Utterance(
+        text=text, start_s=0.0, end_s=3.0, lang="de", segment_ids=["s1"],
+    )
+    out = filter_candidates(
+        [_cand(text=text, source_quote=text, language="de")],
+        focus=de_focus, existing_texts=[], cfg=CFG,
+    )
+    assert len(out.kept) == 1
+
+
+def test_verb_gate_accepts_intent_verb_bereitstellen():
+    text = "Das Backend wird die API Endpunkte für das Frontend bereitstellen."
+    de_focus = Utterance(
+        text=text, start_s=0.0, end_s=3.0, lang="de", segment_ids=["s1"],
+    )
+    out = filter_candidates(
+        [_cand(text=text, source_quote=text, language="de")],
+        focus=de_focus, existing_texts=[], cfg=CFG,
+    )
+    assert len(out.kept) == 1
+
+
 def test_verb_gate_can_be_disabled():
     cfg = FilterConfig(verb_gate=False)
     nv = _cand(

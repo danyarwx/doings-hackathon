@@ -89,11 +89,20 @@ _VERB_PATTERNS = [
     # English intent
     r"\bneed\b", r"\bwant\b", r"\badd\b", r"\bshow\b",
     r"\bsupport\b", r"\ballow\b", r"\bintegrate\b",
-    # German modal
-    r"\bmuss\b", r"\bsoll\b", r"\bsollte\b", r"\bwird\b", r"\bbraucht\b",
+    # German modal (incl. plural / subjunctive / past-participle forms)
+    r"\bmuss\b", r"\bm[üu]ssen\b", r"\bm[üu]sste\b", r"\bm[üu]ssten\b",
+    r"\bsoll\b", r"\bsollte\b", r"\bsollten\b", r"\bsollen\b",
+    r"\bwird\b", r"\bwerden\b", r"\bwerde\b",
+    r"\bbraucht\b", r"\bbrauchen\b",
+    r"\bm[öo]chte\b", r"\bm[öo]chten\b",
+    r"\bkann\b", r"\bkönnen\b", r"\bkönnte\b", r"\bkönnten\b",
     # German intent
-    r"\bbrauchen\b", r"\bwollen\b", r"\bhinzufügen\b",
-    r"\bzeigen\b", r"\bunterstützen\b",
+    r"\bwollen\b", r"\bwill\b",
+    r"\bhinzufügen\b", r"\bzeigen\b", r"\bunterstützen\b",
+    r"\bbereitstellen\b", r"\bbereit\s+stellen\b",
+    r"\bintegrieren\b", r"\bentwickeln\b", r"\bimplementieren\b",
+    r"\bbauen\b", r"\bbieten\b", r"\berlauben\b",
+    r"\beinführen\b", r"\bermöglichen\b",
 ]
 _VERB_RE = re.compile("|".join(_VERB_PATTERNS), re.IGNORECASE | re.UNICODE)
 
