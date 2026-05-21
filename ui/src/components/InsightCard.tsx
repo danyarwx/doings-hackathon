@@ -29,8 +29,11 @@ export default function InsightCard({ insight }: Props) {
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(insight.text);
+  const [quoteOpen, setQuoteOpen] = useState(false);
 
   const acted = insight.status !== "pending";
+  const detail = insight.detail?.trim() || "";
+  const quote = insight.source_quote?.trim() || "";
 
   const run = async (fn: () => Promise<unknown>) => {
     if (busy) return;
@@ -95,10 +98,27 @@ export default function InsightCard({ insight }: Props) {
         <p className="text-sm text-white leading-snug">{insight.text}</p>
       )}
 
-      {insight.source_quote && !editing && (
-        <p className="mt-1.5 text-xs text-white/40 italic leading-snug">
-          “{insight.source_quote}”
-        </p>
+      {!editing && (detail || quote) && (
+        <div className="mt-1.5">
+          {detail && (
+            <p className="text-xs text-white/50 leading-snug">{detail}</p>
+          )}
+          {quote && (
+            <>
+              <button
+                onClick={() => setQuoteOpen((v) => !v)}
+                className="mt-1 text-[10px] text-white/30 hover:text-white/60 uppercase tracking-wider"
+              >
+                {quoteOpen ? "▾ Hide source" : "▸ Show source"}
+              </button>
+              {quoteOpen && (
+                <p className="mt-1 text-xs text-white/35 italic leading-snug">
+                  “{quote}”
+                </p>
+              )}
+            </>
+          )}
+        </div>
       )}
 
       {!acted && !editing && (

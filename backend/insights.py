@@ -19,6 +19,7 @@ class Insight:
     text: str
     original_text: str
     source_quote: str
+    detail: str
     language: str
     status: InsightStatus
     created_at_iso: str

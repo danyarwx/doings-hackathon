@@ -8,6 +8,7 @@ def _seed_insight(app_module):
         text="The system must handle 500 users.",
         original_text="The system must handle 500 users.",
         source_quote="The system must handle 500 users.",
+        detail="",
         language="en",
         certainty="explicit",
         status="pending",

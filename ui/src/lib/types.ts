@@ -33,6 +33,7 @@ export type Insight = {
   text: string;
   original_text: string;
   source_quote: string;
+  detail: string;
   language: string;
   status: InsightStatus;
   created_at_iso: string;

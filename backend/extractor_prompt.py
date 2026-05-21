@@ -42,6 +42,8 @@ ONLY emit entries you believe ARE requirements. Skip everything else. If nothing
 
 `certainty` is "explicit" if the FOCUS utterance contains the modal/intent verb verbatim, or "implied" if you inferred the requirement using CONTEXT (e.g., resolved a pronoun).
 
+`detail` is ONE short sentence (≤ 25 words) that adds USEFUL context drawn from the FOCUS or CONTEXT — surrounding constraints, who/what/where, related decisions. It MUST NOT contradict the transcript and MUST NOT invent specifics that aren't in it. Don't just repeat `text` in different words; only emit a detail when there is real extra information to add. If there is nothing useful to add, return an empty string.
+
 Output the requirement `text` in the same language as the FOCUS (de stays de, en stays en). One entry per distinct requirement.
 
 SCHEMA
@@ -51,6 +53,7 @@ SCHEMA
       "text": "<requirement in source language, complete clause>",
       "category": "functional" | "non_functional",
       "source_quote": "<verbatim span from FOCUS>",
+      "detail": "<one short sentence of grounded context, or empty string>",
       "language": "de" | "en",
       "certainty": "explicit" | "implied"
     }
