@@ -15,8 +15,4 @@ def stop_process(process: subprocess.Popen):
             os.kill(process.pid, signal.CTRL_C_EVENT)
         except (ProcessLookupError, AttributeError, OSError):
             # Fallback if standard signal fails
-<<<<<<< HEAD
             process.terminate()
-=======
-            process.terminate()
->>>>>>> step-1-terminal-stt
