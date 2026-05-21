@@ -40,6 +40,30 @@ Press Ctrl-C to stop.
 
 ## Options
 
+## Capturing System Audio
+
+### macOS
+macOS intentionally blocks apps from recording system audio directly. To capture internal audio (e.g., YouTube videos, Zoom calls), use a virtual audio cable like **BlackHole**:
+
+1. Install BlackHole:
+   ```bash
+   brew install blackhole-2ch
+   ```
+2. Open **Audio MIDI Setup** on your Mac.
+3. Click **`+`** (bottom left) → **Create Multi-Output Device**.
+4. Check both **BlackHole 2ch** AND your listening device (e.g., MacBook Pro Speakers). Check **Drift Correction** for BlackHole.
+5. Right-click the new Multi-Output Device and select **Use This Device For Sound Output** (or select it from the macOS Control Center).
+6. Run `--list-devices` to find the BlackHole ID, then run the script with `--device N`.
+
+### Windows
+Windows natively supports loopback via WASAPI. The capture script automatically selects the WASAPI host API on Windows, exposing your system output devices as inputs.
+
+1. Run the script with `--list-devices` to find your output device (e.g., "Speakers").
+2. Run the script pointing to that device ID:
+   ```bash
+   PYTHONPATH=. capture/.venv/bin/python -m capture.main --device n
+   ```
+
 ### Model and device
 
 ```bash
