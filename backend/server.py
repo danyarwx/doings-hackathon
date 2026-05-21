@@ -488,6 +488,25 @@ async def get_export() -> dict:
     }
 
 
+class ExportDraftBody(BaseModel):
+    requirements: list
+    decisions: list
+
+
+@app.put("/export")
+async def update_export(body: ExportDraftBody) -> dict:
+    """Replace the in-memory export draft with the (edited) version from the UI."""
+    s: SessionState = app.state.session
+    s.export_draft = {"requirements": body.requirements, "decisions": body.decisions}
+    return {"draft": s.export_draft}
+
+
+@app.delete("/export")
+async def clear_export() -> dict:
+    app.state.session.export_draft = None
+    return {"draft": None}
+
+
 @app.post("/export/generate")
 async def generate_export() -> dict:
     s: SessionState = app.state.session

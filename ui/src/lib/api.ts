@@ -142,3 +142,13 @@ export async function generateExport(): Promise<ExportDraft> {
   }
   return (await r.json()).draft;
 }
+
+export async function updateExport(draft: ExportDraft): Promise<ExportDraft> {
+  const r = await fetch("/api/export", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(draft),
+  });
+  if (!r.ok) throw new Error(`export update failed: ${r.status}`);
+  return (await r.json()).draft;
+}

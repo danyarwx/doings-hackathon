@@ -139,3 +139,42 @@ def test_session_reset_clears_export_draft(client, app_module):
     s.export_draft = {"requirements": [], "decisions": []}
     s.reset(session_id="sess-new")
     assert s.export_draft is None
+
+
+def test_put_export_replaces_draft(client, app_module):
+    payload = {
+        "requirements": [
+            {
+                "issuetype": "Story",
+                "summary": "Edited summary",
+                "description": {
+                    "user_story": {"given": "g", "when": "w", "then": "t"},
+                    "acceptance_criteria": ["ac1"],
+                    "invest_validation": {
+                        "independent": True, "negotiable": True, "valuable": True,
+                        "estimable": True, "small": True, "testable": True,
+                    },
+                },
+                "priority": "medium",
+                "labels": ["frontend"],
+                "story_points": 2,
+            }
+        ],
+        "decisions": [{"summary": "Decided to use phi3"}],
+    }
+    r = client.put("/export", json=payload)
+    assert r.status_code == 200
+    assert r.json()["draft"]["requirements"][0]["summary"] == "Edited summary"
+    assert app_module.app.state.session.export_draft["decisions"][0]["summary"] == "Decided to use phi3"
+
+
+def test_put_export_rejects_invalid_shape(client, app_module):
+    r = client.put("/export", json={"requirements": "not-a-list"})
+    assert r.status_code in (400, 422)
+
+
+def test_delete_export_clears_draft(client, app_module):
+    app_module.app.state.session.export_draft = {"requirements": [], "decisions": []}
+    r = client.delete("/export")
+    assert r.status_code == 200
+    assert app_module.app.state.session.export_draft is None
