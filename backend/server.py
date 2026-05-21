@@ -18,6 +18,7 @@ from backend.delivery import deliver
 from backend.export_prompt import build_messages as build_export_messages
 from backend.extractor import ExtractorWorker
 from backend.insights import Insight
+from backend.jira_client import JiraClient
 from backend.llm_router import LLMRouter, provider_of
 from backend.sentence_buffer import SentenceBuffer
 from backend.state import Segment, SessionState
@@ -82,6 +83,12 @@ async def lifespan(app: FastAPI):
         ollama_url=os.getenv("OLLAMA_URL", "http://localhost:11434"),
         openai_key=os.getenv("OPENAI_API_KEY", ""),
         anthropic_key=os.getenv("ANTHROPIC_API_KEY", ""),
+    )
+    app.state.jira = JiraClient(
+        base_url=os.getenv("JIRA_URL", ""),
+        email=os.getenv("JIRA_EMAIL", ""),
+        api_token=os.getenv("JIRA_API_TOKEN", ""),
+        project_key=os.getenv("JIRA_PROJECT", ""),
     )
     app.state.sentence_buffer = SentenceBuffer()
     app.state.extractor = ExtractorWorker(
@@ -564,6 +571,85 @@ async def generate_export() -> dict:
     s.export_draft = draft
     await app.state.hub.broadcast({"type": "export_draft", "draft": draft})
     return {"draft": draft}
+
+
+# ----- Jira config + push ------------------------------------------------
+
+class JiraConfigBody(BaseModel):
+    field: str  # "url" | "email" | "token" | "project"
+    value: str  # empty string clears
+
+
+@app.get("/jira/config")
+async def get_jira_config() -> dict:
+    j: JiraClient = app.state.jira
+    return {
+        "url_set": j.url_set,
+        "email_set": j.email_set,
+        "token_set": j.token_set,
+        "project_set": j.project_set,
+        "url": j.base_url if j.url_set else "",
+        "project": j.project if j.project_set else "",
+    }
+
+
+@app.post("/jira/config")
+async def set_jira_config(body: JiraConfigBody) -> dict:
+    j: JiraClient = app.state.jira
+    if body.field == "url":
+        j.set_url(body.value)
+    elif body.field == "email":
+        j.set_email(body.value)
+    elif body.field == "token":
+        j.set_token(body.value)
+    elif body.field == "project":
+        j.set_project(body.value)
+    else:
+        raise HTTPException(status_code=400, detail="field must be url/email/token/project")
+    return await get_jira_config()
+
+
+class PushBody(BaseModel):
+    index: int  # which requirement in the current export draft
+
+
+@app.post("/export/push")
+async def push_one(body: PushBody) -> dict:
+    j: JiraClient = app.state.jira
+    if not j.fully_configured:
+        raise HTTPException(status_code=400, detail="Jira is not fully configured")
+    draft = app.state.session.export_draft
+    if not draft or body.index < 0 or body.index >= len(draft.get("requirements", [])):
+        raise HTTPException(status_code=404, detail="requirement not found at that index")
+    requirement = draft["requirements"][body.index]
+    decisions = draft.get("decisions", [])
+    try:
+        result = await j.create_issue(requirement=requirement, decisions=decisions)
+    except RuntimeError as exc:
+        print(f"[jira] push failed: {exc}", file=sys.stderr)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return result
+
+
+@app.post("/export/push-all")
+async def push_all() -> dict:
+    j: JiraClient = app.state.jira
+    if not j.fully_configured:
+        raise HTTPException(status_code=400, detail="Jira is not fully configured")
+    draft = app.state.session.export_draft
+    if not draft:
+        raise HTTPException(status_code=404, detail="no export draft to push")
+    decisions = draft.get("decisions", [])
+    results: list[dict] = []
+    for i, req in enumerate(draft.get("requirements", [])):
+        summary = req.get("summary", "")
+        try:
+            r = await j.create_issue(requirement=req, decisions=decisions)
+            results.append({"index": i, "summary": summary, "key": r["key"], "url": r["url"]})
+        except RuntimeError as exc:
+            print(f"[jira] push {i} failed: {exc}", file=sys.stderr)
+            results.append({"index": i, "summary": summary, "error": str(exc)})
+    return {"results": results}
 
 
 class VocabularyBody(BaseModel):

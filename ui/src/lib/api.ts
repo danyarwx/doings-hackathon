@@ -152,3 +152,70 @@ export async function updateExport(draft: ExportDraft): Promise<ExportDraft> {
   if (!r.ok) throw new Error(`export update failed: ${r.status}`);
   return (await r.json()).draft;
 }
+
+export type JiraConfig = {
+  url_set: boolean;
+  email_set: boolean;
+  token_set: boolean;
+  project_set: boolean;
+  url: string;
+  project: string;
+};
+
+export async function getJiraConfig(): Promise<JiraConfig> {
+  const r = await fetch("/api/jira/config");
+  if (!r.ok) throw new Error(`jira config fetch failed: ${r.status}`);
+  return r.json();
+}
+
+export async function setJiraConfigField(
+  field: "url" | "email" | "token" | "project",
+  value: string,
+): Promise<JiraConfig> {
+  const r = await fetch("/api/jira/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ field, value }),
+  });
+  if (!r.ok) throw new Error(`jira config save failed: ${r.status}`);
+  return r.json();
+}
+
+export type JiraPushResult = {
+  key: string;
+  url: string;
+};
+
+export type JiraPushAllRow = {
+  index: number;
+  summary: string;
+  key?: string;
+  url?: string;
+  error?: string;
+};
+
+async function _parseDetail(r: Response): Promise<string> {
+  try {
+    const body = await r.json();
+    if (body?.detail) return String(body.detail);
+  } catch {
+    /* ignore */
+  }
+  return `${r.status}`;
+}
+
+export async function pushExportItem(index: number): Promise<JiraPushResult> {
+  const r = await fetch("/api/export/push", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ index }),
+  });
+  if (!r.ok) throw new Error(await _parseDetail(r));
+  return r.json();
+}
+
+export async function pushExportAll(): Promise<JiraPushAllRow[]> {
+  const r = await fetch("/api/export/push-all", { method: "POST" });
+  if (!r.ok) throw new Error(await _parseDetail(r));
+  return (await r.json()).results;
+}

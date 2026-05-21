@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Download,
+  ExternalLink,
   ListChecks,
   Plus,
   Sparkles,
   Tag,
   Trash2,
+  Upload,
   X,
 } from "lucide-react";
 import type {
@@ -15,8 +17,15 @@ import type {
   ExportRequirement,
   InvestValidation,
 } from "../lib/types";
-import { updateExport } from "../lib/api";
+import {
+  getJiraConfig,
+  pushExportAll,
+  pushExportItem,
+  updateExport,
+} from "../lib/api";
+import type { JiraConfig, JiraPushAllRow } from "../lib/api";
 import GlassCard from "./GlassCard";
+import JiraConfigDrawer from "./JiraConfigDrawer";
 import { cn } from "../lib/utils";
 
 type Props = {
@@ -84,6 +93,23 @@ export default function ExportView({
   const [local, setLocal] = useState<ExportDraft | null>(draft);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const lastSavedRef = useRef<string>("");
+
+  // Jira state
+  const [jiraConfig, setJiraConfig] = useState<JiraConfig>({
+    url_set: false, email_set: false, token_set: false, project_set: false,
+    url: "", project: "",
+  });
+  const [pushingIdx, setPushingIdx] = useState<number | null>(null);
+  const [pushingAll, setPushingAll] = useState(false);
+  // Track pushed results per requirement index → key/url or error.
+  const [pushedKeys, setPushedKeys] = useState<Record<number, { key?: string; url?: string; error?: string }>>({});
+
+  useEffect(() => {
+    getJiraConfig().then(setJiraConfig).catch(() => {});
+  }, []);
+
+  const jiraReady =
+    jiraConfig.url_set && jiraConfig.email_set && jiraConfig.token_set && jiraConfig.project_set;
 
   // Sync local copy when a new draft arrives (e.g. via WS or initial fetch).
   useEffect(() => {
@@ -174,6 +200,41 @@ export default function ExportView({
     });
   }, []);
 
+  const handlePushOne = async (idx: number) => {
+    if (pushingIdx !== null || pushingAll || !jiraReady) return;
+    setPushingIdx(idx);
+    setPushedKeys((prev) => ({ ...prev, [idx]: {} }));
+    try {
+      const result = await pushExportItem(idx);
+      setPushedKeys((prev) => ({ ...prev, [idx]: { key: result.key, url: result.url } }));
+    } catch (err) {
+      console.error(err);
+      setPushedKeys((prev) => ({ ...prev, [idx]: { error: String(err) } }));
+    } finally {
+      setPushingIdx(null);
+    }
+  };
+
+  const handlePushAll = async () => {
+    if (pushingAll || pushingIdx !== null || !jiraReady) return;
+    setPushingAll(true);
+    try {
+      const results: JiraPushAllRow[] = await pushExportAll();
+      const next: Record<number, { key?: string; url?: string; error?: string }> = {};
+      for (const row of results) {
+        next[row.index] = row.error
+          ? { error: row.error }
+          : { key: row.key, url: row.url };
+      }
+      setPushedKeys(next);
+    } catch (err) {
+      console.error(err);
+      alert(String(err));
+    } finally {
+      setPushingAll(false);
+    }
+  };
+
   return (
     <GlassCard className="flex flex-col h-full overflow-hidden">
       <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between gap-3">
@@ -195,6 +256,23 @@ export default function ExportView({
           <SaveIndicator state={saveState} />
         </div>
         <div className="flex items-center gap-2">
+          {local && local.requirements.length > 0 && (
+            <button
+              onClick={handlePushAll}
+              disabled={!jiraReady || pushingAll || pushingIdx !== null}
+              title={jiraReady ? "Push every requirement to Jira" : "Configure Jira below first"}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-medium uppercase tracking-wider border",
+                jiraReady
+                  ? "text-neon-blue bg-neon-blue/10 border-neon-blue/40 hover:bg-neon-blue/20"
+                  : "text-white/30 bg-white/5 border-white/10 cursor-not-allowed",
+                (pushingAll || pushingIdx !== null) && "opacity-50 cursor-not-allowed",
+              )}
+            >
+              <Upload className="w-3 h-3" />
+              {pushingAll ? "Pushing…" : "Push all to Jira"}
+            </button>
+          )}
           {local && downloadUrl && (
             <a
               href={downloadUrl}
@@ -224,6 +302,8 @@ export default function ExportView({
         {generating && <GeneratingState model={model} />}
         {local && (
           <>
+            <JiraConfigDrawer config={jiraConfig} onChange={setJiraConfig} />
+
             <section className="flex flex-col gap-3">
               <div className="flex items-center justify-between">
                 <h3 className="text-[10px] uppercase tracking-wider text-white/40">
@@ -245,8 +325,12 @@ export default function ExportView({
                 <EditableRequirement
                   key={i}
                   req={r}
+                  pushedStatus={pushedKeys[i]}
+                  pushing={pushingIdx === i || pushingAll}
+                  jiraReady={jiraReady}
                   onChange={(patch) => updateRequirement(i, patch)}
                   onRemove={() => removeRequirement(i)}
+                  onPush={() => handlePushOne(i)}
                 />
               ))}
             </section>
@@ -338,10 +422,18 @@ function EditableRequirement({
   req,
   onChange,
   onRemove,
+  onPush,
+  pushedStatus,
+  pushing,
+  jiraReady,
 }: {
   req: ExportRequirement;
   onChange: (patch: Partial<ExportRequirement>) => void;
   onRemove: () => void;
+  onPush: () => void;
+  pushedStatus?: { key?: string; url?: string; error?: string };
+  pushing: boolean;
+  jiraReady: boolean;
 }) {
   const story = req.description.user_story;
   const ac = req.description.acceptance_criteria;
@@ -516,6 +608,47 @@ function EditableRequirement({
 
       {/* Labels */}
       <LabelChips labels={req.labels} onRemove={removeLabel} onAdd={addLabel} />
+
+      {/* Jira push row */}
+      <div className="flex items-center justify-between pt-1 border-t border-white/5">
+        <div className="text-[11px] text-white/50">
+          {pushedStatus?.key && (
+            <span className="flex items-center gap-1 text-neon-green">
+              Pushed:
+              <a
+                href={pushedStatus.url ?? "#"}
+                target="_blank"
+                rel="noreferrer"
+                className="font-mono text-neon-green hover:underline flex items-center gap-1"
+              >
+                {pushedStatus.key}
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </span>
+          )}
+          {pushedStatus?.error && (
+            <span className="text-neon-pink">Error: {pushedStatus.error}</span>
+          )}
+          {!pushedStatus && !jiraReady && (
+            <span className="text-white/30">Configure Jira above to push</span>
+          )}
+        </div>
+        <button
+          onClick={onPush}
+          disabled={!jiraReady || pushing || !!pushedStatus?.key}
+          title={pushedStatus?.key ? "Already pushed" : "Create Jira issue from this requirement"}
+          className={cn(
+            "flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-medium uppercase tracking-wider border",
+            jiraReady && !pushedStatus?.key
+              ? "text-neon-blue bg-neon-blue/10 border-neon-blue/40 hover:bg-neon-blue/20"
+              : "text-white/30 bg-white/5 border-white/10 cursor-not-allowed",
+            pushing && "opacity-60 cursor-wait",
+          )}
+        >
+          <Upload className="w-3 h-3" />
+          {pushing ? "Pushing…" : pushedStatus?.key ? "Pushed" : "Push to Jira"}
+        </button>
+      </div>
     </div>
   );
 }
