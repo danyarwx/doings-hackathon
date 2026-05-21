@@ -127,7 +127,6 @@ def _insight_to_dict(ins: Insight) -> dict:
         "source_quote": ins.source_quote,
         "detail": ins.detail,
         "language": ins.language,
-        "certainty": ins.certainty,
         "status": ins.status,
         "created_at_iso": ins.created_at_iso,
     }

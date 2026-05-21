@@ -57,7 +57,6 @@ def test_reset_clears_insights_too():
         source_quote="x",
         detail="",
         language="en",
-        certainty="explicit",
         status="pending",
         created_at_iso="2026-05-19T00:00:00Z",
     )

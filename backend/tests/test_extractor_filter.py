@@ -21,7 +21,6 @@ def _cand(**overrides) -> dict:
         "category": "functional",
         "source_quote": GOOD_QUOTE,
         "language": "en",
-        "certainty": "explicit",
     }
     base.update(overrides)
     return base
@@ -141,19 +140,15 @@ def test_fuzzy_dedupe_threshold_tunable():
     assert len(out.kept) == 1
 
 
-def test_schema_invalid_certainty_drops():
-    out = filter_candidates([_cand(certainty="probably")], focus=FOCUS, existing_texts=[], cfg=CFG)
-    assert out.dropped[0].gate == "schema"
-
-
 def test_schema_invalid_category_drops():
     out = filter_candidates([_cand(category="ux")], focus=FOCUS, existing_texts=[], cfg=CFG)
     assert out.dropped[0].gate == "schema"
 
 
-def test_survivor_has_certainty():
+def test_survivor_passes_through_known_fields():
     out = filter_candidates([_cand()], focus=FOCUS, existing_texts=[], cfg=CFG)
-    assert out.kept[0]["certainty"] == "explicit"
+    assert out.kept[0]["category"] == "functional"
+    assert out.kept[0]["language"] == "en"
 
 
 def test_paraphrased_quote_with_5word_overlap_passes():

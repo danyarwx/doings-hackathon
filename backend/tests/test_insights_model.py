@@ -11,7 +11,6 @@ def test_insight_minimal_fields():
         source_quote="The system must handle 500 concurrent users.",
         detail="",
         language="en",
-        certainty="explicit",
         status="pending",
         created_at_iso="2026-05-19T00:00:00Z",
     )
@@ -29,7 +28,6 @@ def test_insight_is_frozen():
         source_quote="x",
         detail="",
         language="en",
-        certainty="explicit",
         status="pending",
         created_at_iso="2026-05-19T00:00:00Z",
     )

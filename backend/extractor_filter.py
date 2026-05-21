@@ -78,7 +78,6 @@ def _normalize(s: str) -> str:
 
 
 _VALID_CATEGORY = {"functional", "non_functional"}
-_VALID_CERTAINTY = {"explicit", "implied"}
 
 # Word-boundary, case-insensitive. Multi-word forms ("needs to", "has to") use
 # explicit spacing; single tokens use \b boundaries.
@@ -191,11 +190,9 @@ def filter_candidates(
 
         # Gate 5: schema sanity
         category = c.get("category")
-        certainty = c.get("certainty")
         language = c.get("language")
         if (
             category not in _VALID_CATEGORY
-            or certainty not in _VALID_CERTAINTY
             or not isinstance(language, str)
             or len(language) != 2
             or len(text) > 500

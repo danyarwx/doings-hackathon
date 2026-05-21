@@ -15,16 +15,6 @@ const CATEGORY_CLASS = {
   non_functional: "bg-neon-amber/15 text-neon-amber border-neon-amber/40",
 } as const;
 
-const CERTAINTY_LABEL = {
-  explicit: "Explicit",
-  implied: "Implied",
-} as const;
-
-const CERTAINTY_CLASS = {
-  explicit: "bg-neon-cyan/15 text-neon-cyan border-neon-cyan/40",
-  implied: "bg-neon-amber/15 text-neon-amber border-neon-amber/40",
-} as const;
-
 export default function InsightCard({ insight }: Props) {
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -68,7 +58,7 @@ export default function InsightCard({ insight }: Props) {
         insight.status === "declined" && "opacity-40",
       )}
     >
-      <div className="flex items-center justify-between gap-2 mb-2">
+      <div className="flex items-center gap-2 mb-2">
         <span
           className={cn(
             "px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-wider border",
@@ -76,14 +66,6 @@ export default function InsightCard({ insight }: Props) {
           )}
         >
           {CATEGORY_LABEL[insight.category]}
-        </span>
-        <span
-          className={cn(
-            "px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-wider border ml-auto",
-            CERTAINTY_CLASS[insight.certainty],
-          )}
-        >
-          {CERTAINTY_LABEL[insight.certainty]}
         </span>
       </div>
 

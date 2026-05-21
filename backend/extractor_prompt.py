@@ -32,15 +32,13 @@ BAD examples (skip these — do NOT include them in output):
 - "It would be sales made." — ambiguous fragment, no clear requirement
 
 GOOD examples (these are real requirements):
-- "The dashboard must show monthly revenue." — modal + clause → explicit
-- "We need to support German language input." — intent + clause → explicit
-- "Sales reports should export to CSV." — modal + clause → explicit
+- "The dashboard must show monthly revenue." — modal + complete clause
+- "We need to support German language input." — intent + complete clause
+- "Sales reports should export to CSV." — modal + complete clause
 
 ONLY emit entries you believe ARE requirements. Skip everything else. If nothing qualifies, return {"requirements": []}.
 
 `source_quote` MUST be a verbatim span copied from the FOCUS utterance — no paraphrasing, no shortening. If you can't quote it exactly, skip the entry.
-
-`certainty` is "explicit" if the FOCUS utterance contains the modal/intent verb verbatim, or "implied" if you inferred the requirement using CONTEXT (e.g., resolved a pronoun).
 
 `detail` is ONE short sentence (≤ 25 words) that adds USEFUL context drawn from the FOCUS or CONTEXT — surrounding constraints, who/what/where, related decisions. It MUST NOT contradict the transcript and MUST NOT invent specifics that aren't in it. Don't just repeat `text` in different words; only emit a detail when there is real extra information to add. If there is nothing useful to add, return an empty string.
 
@@ -54,8 +52,7 @@ SCHEMA
       "category": "functional" | "non_functional",
       "source_quote": "<verbatim span from FOCUS>",
       "detail": "<one short sentence of grounded context, or empty string>",
-      "language": "de" | "en",
-      "certainty": "explicit" | "implied"
+      "language": "de" | "en"
     }
   ]
 }

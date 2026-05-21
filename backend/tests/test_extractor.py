@@ -39,7 +39,6 @@ def _good_candidate(text: str) -> dict:
         "category": "functional",
         "source_quote": text,
         "language": "en",
-        "certainty": "explicit",
     }
 
 
@@ -60,8 +59,9 @@ async def test_worker_processes_utterance_and_broadcasts_insight():
         await asyncio.sleep(0.05)
         assert any(m["type"] == "insight" for m in hub.messages)
         ins_msg = next(m for m in hub.messages if m["type"] == "insight")
-        assert ins_msg["insight"]["certainty"] == "explicit"
+        assert ins_msg["insight"]["category"] == "functional"
         assert "confidence" not in ins_msg["insight"]
+        assert "certainty" not in ins_msg["insight"]
     finally:
         await worker.stop()
 

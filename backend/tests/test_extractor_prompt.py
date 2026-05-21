@@ -6,13 +6,19 @@ def _u(text: str, start: float = 0.0, end: float = 2.0, lang: str = "en") -> Utt
     return Utterance(text=text, start_s=start, end_s=end, lang=lang, segment_ids=["s1"])
 
 
-def test_system_prompt_mentions_certainty_and_few_shot():
-    assert "certainty" in SYSTEM_PROMPT
-    assert "explicit" in SYSTEM_PROMPT
-    assert "implied" in SYSTEM_PROMPT
+def test_system_prompt_mentions_few_shot():
     # Few-shot anchors
     assert "product requirements" in SYSTEM_PROMPT
     assert "must show monthly revenue" in SYSTEM_PROMPT
+    # Schema fields the model is expected to emit
+    assert "category" in SYSTEM_PROMPT
+    assert "source_quote" in SYSTEM_PROMPT
+    assert "detail" in SYSTEM_PROMPT
+
+
+def test_system_prompt_does_not_mention_certainty():
+    assert "certainty" not in SYSTEM_PROMPT.lower()
+    assert "explicit" not in SYSTEM_PROMPT.lower()
 
 
 def test_system_prompt_does_not_mention_confidence():
