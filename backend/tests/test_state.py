@@ -55,6 +55,7 @@ def test_reset_clears_insights_too():
         text="x",
         original_text="x",
         source_quote="x",
+        detail="",
         language="en",
         certainty="explicit",
         status="pending",
