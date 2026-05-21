@@ -26,6 +26,7 @@ import {
 import type { JiraConfig, JiraPushAllRow } from "../lib/api";
 import GlassCard from "./GlassCard";
 import JiraConfigDrawer from "./JiraConfigDrawer";
+import { GlassButton, glassButtonVariants } from "./ui/glass-button";
 import { cn } from "../lib/utils";
 
 type Props = {
@@ -257,48 +258,46 @@ export default function ExportView({
         </div>
         <div className="flex items-center gap-2">
           {local && local.requirements.length > 0 && (
-            <button
+            <GlassButton
+              size="sm"
+              tone="blue"
               onClick={handlePushAll}
               disabled={!jiraReady || pushingAll || pushingIdx !== null}
               title={jiraReady ? "Push every requirement to Jira" : "Configure Jira below first"}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-medium uppercase tracking-wider border",
-                jiraReady
-                  ? "text-neon-blue bg-neon-blue/10 border-neon-blue/40 hover:bg-neon-blue/20"
-                  : "text-white/30 bg-white/5 border-white/10 cursor-not-allowed",
-                (pushingAll || pushingIdx !== null) && "opacity-50 cursor-not-allowed",
-              )}
             >
-              <Upload className="w-3 h-3" />
+              <Upload className="w-3.5 h-3.5" />
               {pushingAll ? "Pushing…" : "Push all to Jira"}
-            </button>
+            </GlassButton>
           )}
           {local && downloadUrl && (
             <a
               href={downloadUrl}
               download={`doings-export-${Date.now()}.json`}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] uppercase tracking-wider text-white/60 hover:text-white hover:bg-white/5 border border-white/10"
+              className={glassButtonVariants({ size: "sm", tone: "neutral" })}
             >
-              <Download className="w-3 h-3" /> Download JSON
+              <span className="inline-flex items-center gap-2">
+                <Download className="w-3.5 h-3.5" /> Download JSON
+              </span>
             </a>
           )}
-          <button
-            onClick={onGenerate}
-            disabled={generating}
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-medium uppercase tracking-wider border",
-              "text-neon-cyan bg-neon-cyan/10 border-neon-cyan/40 hover:bg-neon-cyan/20",
-              generating && "opacity-50 cursor-not-allowed",
-            )}
-          >
-            <Sparkles className="w-3 h-3" />
-            {generating ? "Generating…" : local ? "Regenerate" : "Generate"}
-          </button>
+          {local && (
+            <GlassButton
+              size="sm"
+              tone="cyan"
+              onClick={onGenerate}
+              disabled={generating}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              {generating ? "Generating…" : "Regenerate"}
+            </GlassButton>
+          )}
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4">
-        {!local && !generating && <EmptyState model={model} />}
+        {!local && !generating && (
+          <EmptyState model={model} onGenerate={onGenerate} />
+        )}
         {generating && <GeneratingState model={model} />}
         {local && (
           <>
@@ -383,20 +382,32 @@ function SaveIndicator({ state }: { state: "idle" | "saving" | "saved" | "error"
   );
 }
 
-function EmptyState({ model }: { model: string }) {
+function EmptyState({
+  model,
+  onGenerate,
+}: {
+  model: string;
+  onGenerate: () => void;
+}) {
   return (
     <div className="flex-1 flex items-center justify-center">
-      <div className="text-center text-white/40 text-sm border border-dashed border-white/20 rounded-xl p-6 max-w-md">
-        <div className="text-white/60 mb-2 flex items-center justify-center gap-1.5">
-          <Sparkles className="w-4 h-4" /> Ready to generate
+      <div className="flex flex-col items-center gap-6 max-w-md text-center">
+        <div className="text-[10px] uppercase tracking-[0.2em] text-white/40">
+          Ready to generate
         </div>
-        <div className="text-xs leading-relaxed">
-          Click <span className="text-white/70 font-medium">Generate</span> to run a post-meeting pass
-          on the approved insights from the just-finished session. You'll get Jira-ready user
-          stories (Given/When/Then + acceptance criteria + INVEST) and a list of decisions, all
-          editable inline.
-        </div>
-        <div className="text-[10px] text-white/30 mt-3">
+        <h3 className="text-2xl font-semibold text-white leading-snug">
+          Turn this meeting into Jira-ready user stories
+        </h3>
+        <p className="text-sm text-white/50 leading-relaxed">
+          One pass over the approved insights from the just-finished session.
+          You'll get user stories (Given/When/Then) with acceptance criteria,
+          INVEST validation, and a list of decisions — all editable inline.
+        </p>
+        <GlassButton size="lg" tone="cyan" onClick={onGenerate}>
+          <Sparkles className="w-5 h-5" />
+          <span>Generate</span>
+        </GlassButton>
+        <div className="text-[11px] text-white/30">
           Active model: <span className="font-mono">{model}</span>
         </div>
       </div>
@@ -633,21 +644,16 @@ function EditableRequirement({
             <span className="text-white/30">Configure Jira above to push</span>
           )}
         </div>
-        <button
+        <GlassButton
+          size="sm"
+          tone="blue"
           onClick={onPush}
           disabled={!jiraReady || pushing || !!pushedStatus?.key}
           title={pushedStatus?.key ? "Already pushed" : "Create Jira issue from this requirement"}
-          className={cn(
-            "flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-medium uppercase tracking-wider border",
-            jiraReady && !pushedStatus?.key
-              ? "text-neon-blue bg-neon-blue/10 border-neon-blue/40 hover:bg-neon-blue/20"
-              : "text-white/30 bg-white/5 border-white/10 cursor-not-allowed",
-            pushing && "opacity-60 cursor-wait",
-          )}
         >
-          <Upload className="w-3 h-3" />
-          {pushing ? "Pushing…" : pushedStatus?.key ? "Pushed" : "Push to Jira"}
-        </button>
+          <Upload className="w-3.5 h-3.5" />
+          <span>{pushing ? "Pushing…" : pushedStatus?.key ? "Pushed" : "Push to Jira"}</span>
+        </GlassButton>
       </div>
     </div>
   );
