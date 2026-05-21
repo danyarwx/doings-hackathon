@@ -176,7 +176,7 @@ export default function AppNav({ onSelectPast }: Props) {
   };
 
   return (
-    <nav className="sticky top-0 z-40 bg-transparent">
+    <nav className="sticky top-0 z-40 bg-transparent pt-6">
       <div ref={wrapRef} className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between gap-6">
         {/* Left: brand */}
         <div className="flex items-center gap-2">
