@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Clock, BookText, Cpu, Download, ChevronDown, Sparkles, Cloud, KeyRound } from "lucide-react";
+import { Clock, BookText, Cpu, Download, Sparkles, Cloud, KeyRound } from "lucide-react";
+import { NavHeader, NavTab } from "./ui/nav-header";
 import {
   getApiKeyStatus,
   getModel,
@@ -188,58 +189,52 @@ export default function AppNav({ onSelectPast }: Props) {
           </span>
         </div>
 
-        {/* Right: actions */}
-        <div className="flex items-center gap-1">
-          {/* History */}
-          <NavButton
+        {/* Right: pill nav with hover-cursor */}
+        <NavHeader>
+          <NavTab
             active={open === "history"}
             onClick={() => setOpen(open === "history" ? null : "history")}
-            icon={<Clock className="w-3.5 h-3.5" />}
-            label="History"
-          />
+          >
+            <Clock className="w-3.5 h-3.5" />
+            <span>History</span>
+          </NavTab>
 
-          {/* Vocabulary */}
-          <NavButton
+          <NavTab
             active={open === "vocab"}
             onClick={() => {
               setVocabDraft(vocab);
               setOpen(open === "vocab" ? null : "vocab");
             }}
-            icon={<BookText className="w-3.5 h-3.5" />}
-            label="Vocabulary"
-            badge={vocab ? `${vocab.split(/[,;\s]+/).filter(Boolean).length} words` : undefined}
-          />
+          >
+            <BookText className="w-3.5 h-3.5" />
+            <span>Vocabulary</span>
+            {vocab && (
+              <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] tracking-wider bg-white/20">
+                {vocab.split(/[,;\s]+/).filter(Boolean).length}
+              </span>
+            )}
+          </NavTab>
 
-          {/* Model picker */}
-          <NavButton
+          <NavTab
             active={open === "model"}
             onClick={() => setOpen(open === "model" ? null : "model")}
-            icon={
-              MODELS.find((m) => m.id === model)?.kind === "cloud" ? (
-                <Cloud className="w-3.5 h-3.5" />
-              ) : (
-                <Cpu className="w-3.5 h-3.5" />
-              )
-            }
-            label={shortModelLabel(model)}
-            withChevron
-          />
-
-          <div className="w-px h-5 bg-white/10 mx-2" />
-
-          {/* Export (disabled) */}
-          <button
-            disabled
-            title="Available in Step 4"
-            className="text-xs py-1.5 px-3 flex items-center gap-1.5 uppercase tracking-wider font-medium text-white/25 cursor-not-allowed"
           >
+            {MODELS.find((m) => m.id === model)?.kind === "cloud" ? (
+              <Cloud className="w-3.5 h-3.5" />
+            ) : (
+              <Cpu className="w-3.5 h-3.5" />
+            )}
+            <span>{shortModelLabel(model)}</span>
+          </NavTab>
+
+          <NavTab disabled title="Available in Step 4">
             <Download className="w-3.5 h-3.5" />
             <span>Export</span>
-            <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider bg-white/5 text-white/30">
+            <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] tracking-wider bg-white/10 text-white/40">
               soon
             </span>
-          </button>
-        </div>
+          </NavTab>
+        </NavHeader>
 
         {/* Dropdown panels */}
         <AnimatePresence>
@@ -381,47 +376,6 @@ export default function AppNav({ onSelectPast }: Props) {
         </AnimatePresence>
       </div>
     </nav>
-  );
-}
-
-function NavButton({
-  active,
-  onClick,
-  icon,
-  label,
-  badge,
-  withChevron,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  label: string;
-  badge?: string;
-  withChevron?: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "text-xs py-1.5 px-3 flex items-center gap-1.5 uppercase tracking-wider font-medium rounded-md transition-colors",
-        active
-          ? "text-white bg-white/10"
-          : "text-white/60 hover:text-white hover:bg-white/5",
-      )}
-    >
-      {icon}
-      <span>{label}</span>
-      {badge && (
-        <span className="ml-0.5 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider bg-white/10 text-white/50">
-          {badge}
-        </span>
-      )}
-      {withChevron && (
-        <ChevronDown
-          className={cn("w-3 h-3 transition-transform duration-200", active && "rotate-180")}
-        />
-      )}
-    </button>
   );
 }
 
