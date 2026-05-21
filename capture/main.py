@@ -96,6 +96,24 @@ def parse_args() -> argparse.Namespace:
         help="Backend URL (e.g. http://localhost:8000). When set, each segment is "
         "POSTed to {api_url}/segments fire-and-forget.",
     )
+    p.add_argument(
+        "--vad-threshold",
+        type=float,
+        default=-40.0,
+        help="Volume threshold in dBFS to trigger recording (default: -40.0).",
+    )
+    p.add_argument(
+        "--vad-silence",
+        type=float,
+        default=0.5,
+        help="Seconds of silence to wait before cutting a chunk (default: 0.4).",
+    )
+    p.add_argument(
+        "--vad-max-duration",
+        type=float,
+        default=10.0,
+        help="Maximum chunk duration in seconds if speech doesn't pause (default: 10.0).",
+    )
     p.add_argument("--list-devices", action="store_true", help="List input devices and exit")
     return p.parse_args()
 
@@ -213,7 +231,14 @@ def main() -> int:
         if line:
             print(CLEAR_LINE + line, end="", flush=True)
 
-    capture_thread = start_capture(chunk_queue, stop_event, device=args.device)
+    capture_thread = start_capture(
+        chunk_queue,
+        stop_event,
+        device=args.device,
+        silence_threshold_dbfs=args.vad_threshold,
+        silence_duration_s=args.vad_silence,
+        max_duration_s=args.vad_max_duration,
+    )
     print("[main] recording. press Ctrl-C to stop.", file=sys.stderr)
 
     segment_count = 0
