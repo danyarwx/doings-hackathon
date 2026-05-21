@@ -1,6 +1,7 @@
 import type { AiStatus, Insight } from "../lib/types";
 import GlassCard from "./GlassCard";
 import InsightCard from "./InsightCard";
+import Loader12 from "./ui/loader-12";
 
 type Props = {
   insights: Insight[];
@@ -83,12 +84,21 @@ export default function InsightsPanel({ insights, aiStatus }: Props) {
       </div>
       <div className="flex-1 overflow-y-auto px-5 py-3 flex flex-col gap-2">
         {insights.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center text-white/40 text-sm border border-dashed border-white/20 rounded-xl p-6 max-w-xs">
-              <div className="text-white/60 mb-2">{empty.title}</div>
-              <div className="text-xs">{empty.sub}</div>
+          aiStatus === "thinking" || aiStatus === "loading" ? (
+            <div className="flex-1 flex flex-col items-center justify-center gap-3">
+              <Loader12 />
+              <div className="text-center text-white/50 text-sm mt-2">
+                {aiStatus === "loading" ? "Loading model…" : "Thinking…"}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="text-center text-white/40 text-sm border border-dashed border-white/20 rounded-xl p-6 max-w-xs">
+                <div className="text-white/60 mb-2">{empty.title}</div>
+                <div className="text-xs">{empty.sub}</div>
+              </div>
+            </div>
+          )
         ) : (
           insights.map((insight) => <InsightCard key={insight.id} insight={insight} />)
         )}

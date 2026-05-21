@@ -27,6 +27,7 @@ import type { JiraConfig, JiraPushAllRow } from "../lib/api";
 import GlassCard from "./GlassCard";
 import JiraConfigDrawer from "./JiraConfigDrawer";
 import { GlassButton, glassButtonVariants } from "./ui/glass-button";
+import { GooeyLoader } from "./ui/loader-10";
 import { cn } from "../lib/utils";
 
 type Props = {
@@ -417,12 +418,13 @@ function EmptyState({
 
 function GeneratingState({ model }: { model: string }) {
   return (
-    <div className="flex-1 flex items-center justify-center">
-      <div className="text-center text-white/50 text-sm border border-dashed border-white/20 rounded-xl p-6 max-w-md">
-        <div className="text-white/70 mb-2">Generating…</div>
-        <div className="text-xs">
-          Running the export pass through <span className="font-mono">{model}</span>. Cloud models
-          finish in a few seconds; local models can take 30–120s.
+    <div className="flex-1 flex flex-col items-center justify-center gap-8">
+      <GooeyLoader />
+      <div className="text-center max-w-md flex flex-col gap-2">
+        <div className="text-white/80 text-base font-medium">Generating Jira-ready JSON…</div>
+        <div className="text-xs text-white/40 leading-relaxed">
+          Running the export pass through <span className="font-mono text-white/60">{model}</span>.
+          Cloud models finish in a few seconds; local models can take 30–120s on the first call.
         </div>
       </div>
     </div>
