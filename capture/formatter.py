@@ -1,7 +1,9 @@
+import sys
 from typing import Optional
 
 from capture.segment import Segment
 
+ARROW = "->" if sys.platform == "win32" else "→"
 
 def _fmt_ts(seconds: float) -> str:
     """Format seconds as MM:SS.t (one decimal). Minutes can exceed 59."""
@@ -15,4 +17,4 @@ def format_segment(seg: Segment) -> Optional[str]:
     text = seg.text.strip()
     if not text:
         return None
-    return f"[{_fmt_ts(seg.start_s)} → {_fmt_ts(seg.end_s)}] [{seg.lang.upper()}] {text}"
+    return f"[{_fmt_ts(seg.start_s)} {ARROW} {_fmt_ts(seg.end_s)}] [{seg.lang.upper()}] {text}"
