@@ -28,7 +28,8 @@ from capture.utils import check_hardware_warnings
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Local live STT to the terminal.")
-    p.add_argument("--model", default="medium", help="Whisper model (default: medium)")
+    _default_model = "tiny" if sys.platform == "win32" else "medium"
+    p.add_argument("--model", default=_default_model, help="Whisper model (default: tiny on Windows, medium on macOS/Linux)")
     p.add_argument("--device", type=int, default=None, help="Input device index")
     p.add_argument(
         "--language",
